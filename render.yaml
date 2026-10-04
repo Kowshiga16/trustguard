@@ -1,0 +1,65 @@
+# Render Infrastructure-as-Code Blueprint
+# Deploy both services in 1-click on Render: https://render.com
+services:
+  # 1. Isolation Forest Machine Learning Microservice
+  - type: web
+    name: trustguard-ml
+    env: python
+    region: oregon
+    plan: free
+    rootDir: ml-service
+    buildCommand: pip install -r requirements.txt && python -c "from app import load_or_train_model; load_or_train_model()"
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.8
+
+  # 2. TrustGuard Fullstack Web Application (Node Express + React)
+  - type: web
+    name: trustguard-web
+    env: node
+    region: oregon
+    plan: free
+    rootDir: Project1
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/system/stats
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGO_URI
+        sync: false # Provide your MongoDB Atlas Connection String
+      - key: MONGO_DB_NAME
+        value: trustguard
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_TTL
+        value: 7d
+      - key: ML_SERVICE_URL
+        fromService:
+          type: web
+          name: trustguard-ml
+          property: host
+      - key: ML_TIMEOUT_MS
+        value: 2000
+      - key: ML_SCORE_WEIGHT
+        value: 0.25
+      - key: ENABLE_EMAIL_ALERTS
+        value: true
+      - key: SECURITY_ALERT_EMAIL
+        value: kowshiga931@gmail.com
+      - key: OVERRIDE_RECIPIENT_EMAIL
+        value: kowshiga931@gmail.com
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        value: '"TrustGuard Security Engine" <security-alerts@trustguard.gov.in>'

@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  # 1. MongoDB Database
+  mongo:
+    image: mongo:7.0
+    container_name: trustguard-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - trustguard-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. Isolation Forest Machine Learning Service
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    container_name: trustguard-ml
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+    networks:
+      - trustguard-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 3. TrustGuard Fullstack Web Application (Node Express + React SPA)
+  web:
+    build:
+      context: ./Project1
+      dockerfile: Dockerfile
+    container_name: trustguard-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      ml-service:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - MONGO_URI=mongodb://mongo:27017/trustguard
+      - MONGO_DB_NAME=trustguard
+      - JWT_SECRET=trustguard-super-secure-production-secret-2026
+      - JWT_TTL=7d
+      - ML_SERVICE_URL=http://ml-service:8000/predict
+      - ML_TIMEOUT_MS=2000
+      - ML_SCORE_WEIGHT=0.25
+      - ENABLE_EMAIL_ALERTS=true
+      - SECURITY_ALERT_EMAIL=kowshiga931@gmail.com
+      - OVERRIDE_RECIPIENT_EMAIL=kowshiga931@gmail.com
+      - SMTP_FROM="TrustGuard Security Engine" <security-alerts@trustguard.gov.in>
+      # Fill SMTP host/user/pass below if using external mail server
+      # - SMTP_HOST=smtp.gmail.com
+      # - SMTP_PORT=587
+      # - SMTP_SECURE=false
+      # - SMTP_USER=your_email@gmail.com
+      # - SMTP_PASS=your_app_password
+    networks:
+      - trustguard-net
+
+networks:
+  trustguard-net:
+    driver: bridge
+
+volumes:
+  mongo_data:
+    driver: local
