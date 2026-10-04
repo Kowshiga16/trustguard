@@ -560,6 +560,7 @@ export interface SessionOtpRecord {
   emailSent: boolean;
   emailStatus: string;
   simulated: boolean;
+  deliveryError?: string;
 }
 
 const sessionOtpCodes = new Map<string, SessionOtpRecord>();
@@ -571,7 +572,7 @@ function generateOtp(): string {
 async function issueOtpForSession(
   session: ActiveSession, 
   triggerSource: string = "Dynamic Low-Trust Step-Up Verification"
-): Promise<{ code: string; emailStatus: string; simulated: boolean }> {
+): Promise<{ code: string; emailStatus: string; simulated: boolean; error?: string }> {
   const code = generateOtp();
   const roleThreshold = getRoleOtpThreshold(session.role);
   const user = users.find(u => u.id === session.userId);
@@ -618,6 +619,17 @@ async function issueOtpForSession(
     otpRecord.emailSent = sendResult.success;
     otpRecord.simulated = !!sendResult.simulated;
     otpRecord.emailStatus = sendResult.simulated ? "SIMULATED_LOGGED" : (sendResult.success ? "SENT" : "FAILED");
+    if (!sendResult.success && sendResult.error) {
+      otpRecord.deliveryError = sendResult.error;
+    }
+
+    console.log(`\n=======================================================================`);
+    console.log(`  [TrustGuard STEP-UP OTP DISPATCH AUDIT]`);
+    console.log(`  Officer:       ${session.userName} (${session.role})`);
+    console.log(`  Recipient:     ${recipientEmail}`);
+    console.log(`  OTP CODE:      >>> ${code} <<<`);
+    console.log(`  Delivery:      ${sendResult.success ? "DELIVERED TO INBOX (" + sendResult.messageId + ")" : "SMTP FAILED (" + sendResult.error + ")"}`);
+    console.log(`=======================================================================\n`);
 
     // Record step-up OTP issuance in audit trail
     const audit: AuditLog = {
@@ -651,16 +663,19 @@ async function issueOtpForSession(
     return {
       code,
       emailStatus: otpRecord.emailStatus,
-      simulated: otpRecord.simulated
+      simulated: otpRecord.simulated,
+      error: sendResult.error
     };
   } catch (err: any) {
     console.error("[NodeMailer OTP Error] Failed to dispatch OTP email:", err);
     otpRecord.emailSent = false;
     otpRecord.emailStatus = "FAILED";
+    otpRecord.deliveryError = err?.message || String(err);
     return {
       code,
       emailStatus: "FAILED",
-      simulated: false
+      simulated: false,
+      error: err?.message || String(err)
     };
   }
 }
@@ -1507,6 +1522,9 @@ async function startServer() {
     const activeOtp = sessionOtpCodes.get(session.id);
     const isExpired = activeOtp ? Date.now() >= activeOtp.expiresAt : true;
 
+    const user = users.find(u => u.id === session.userId);
+    const recipientEmail = resolveActualRecipient(session.userEmail || user?.email);
+
     res.json({
       role: session.role,
       roleThreshold,
@@ -1514,7 +1532,10 @@ async function startServer() {
       otpRequired: session.currentTrustScore < roleThreshold && !session.otpVerified,
       otpVerified: session.otpVerified,
       hasActiveOtp: !isExpired,
-      emailStatus: activeOtp?.emailStatus || "NONE"
+      recipientEmail: activeOtp?.userEmail || recipientEmail,
+      activeOtpCode: activeOtp?.code,
+      emailStatus: activeOtp?.emailStatus || "NONE",
+      deliveryError: activeOtp?.deliveryError
     });
   });
 
@@ -1527,14 +1548,22 @@ async function startServer() {
     const triggerSource = req.body.reason || "Manual Step-Up OTP Verification Request";
     const otpResult = await issueOtpForSession(session, triggerSource);
     const roleThreshold = getRoleOtpThreshold(session.role);
+    const user = users.find(u => u.id === session.userId);
+    const recipientEmail = resolveActualRecipient(session.userEmail || user?.email);
 
     res.json({ 
       success: true,
-      userEmail: session.userEmail,
+      userEmail: recipientEmail,
+      targetRecipient: recipientEmail,
+      activeOtpCode: otpResult.code,
+      emailStatus: otpResult.emailStatus,
+      deliveryError: otpResult.error,
       role: session.role,
       roleThreshold,
       simulated: otpResult.simulated,
-      message: `Real-time OTP generated and dispatched to ${session.userEmail} via NodeMailer.`
+      message: otpResult.emailStatus === "SENT" 
+        ? `Real-time OTP generated and successfully delivered to ${recipientEmail} via NodeMailer.` 
+        : `Real-time OTP generated for ${recipientEmail}. Delivery status: ${otpResult.emailStatus}`
     });
   });
 

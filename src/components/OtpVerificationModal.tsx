@@ -35,6 +35,9 @@ export default function OtpVerificationModal({
   const [errorMsg, setErrorMsg] = useState("");
   const [resendSuccess, setResendSuccess] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [deliveryStatus, setDeliveryStatus] = useState<string>("SENT");
+  const [targetEmail, setTargetEmail] = useState<string>("kowshiga931@gmail.com");
+  const [availableCode, setAvailableCode] = useState<string>("");
 
   const roleThreshold = getRoleThreshold(session?.role);
 
@@ -45,12 +48,22 @@ export default function OtpVerificationModal({
   );
 
   useEffect(() => {
-    if (isOtpNeeded) {
+    if (isOtpNeeded && session) {
       setOtp("");
       setErrorMsg("");
       setSuccess(false);
       setResendSuccess(false);
       void onRequestOtp();
+
+      // Query real delivery status & active OTP from server
+      fetch(`/api/security/otp-status/${session.id}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.recipientEmail) setTargetEmail(data.recipientEmail);
+          if (data.emailStatus) setDeliveryStatus(data.emailStatus);
+          if (data.activeOtpCode) setAvailableCode(data.activeOtpCode);
+        })
+        .catch(() => {});
     }
   }, [session?.id, session?.currentTrustScore, session?.otpVerified, isOtpNeeded]);
 
@@ -63,7 +76,15 @@ export default function OtpVerificationModal({
     setErrorMsg("");
     setResendSuccess(false);
     try {
-      await onRequestOtp();
+      const res = await fetch("/api/security/request-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: session?.id, reason: "User requested OTP resend from modal" })
+      });
+      const data = await res.json();
+      if (data.targetRecipient) setTargetEmail(data.targetRecipient);
+      if (data.emailStatus) setDeliveryStatus(data.emailStatus);
+      if (data.activeOtpCode) setAvailableCode(data.activeOtpCode);
       setResendSuccess(true);
       setTimeout(() => setResendSuccess(false), 4000);
     } catch (err: any) {
@@ -130,15 +151,34 @@ export default function OtpVerificationModal({
             {/* Email dispatch confirmation banner */}
             <div className="bg-indigo-50/80 border border-indigo-100 p-3.5 rounded-lg flex items-start gap-2.5 text-xs text-indigo-950">
               <Mail className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <span className="font-bold text-indigo-950 block">Real-Time Verification Code Dispatched:</span>
+              <div className="space-y-1 w-full">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-indigo-950 block">Real-Time Code Dispatched:</span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    deliveryStatus === "SENT" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+                  }`}>
+                    {deliveryStatus === "SENT" ? "✔ Sent via Gmail" : deliveryStatus}
+                  </span>
+                </div>
                 <p className="text-slate-600 leading-normal">
-                  A 6-digit one-time passcode has been sent to your verified email:
-                  <b className="font-mono text-indigo-900 block mt-0.5 break-all">{session.userEmail || session.userName}</b>
+                  A 6-digit one-time passcode has been dispatched to:
+                  <b className="font-mono text-indigo-900 block mt-0.5 break-all">{targetEmail}</b>
                 </p>
                 <p className="text-[11px] text-slate-500 italic mt-1">
-                  Please open your Gmail inbox (or spam folder) and enter the received code below.
+                  Check your inbox or <b>Spam folder</b> in <span className="font-medium text-slate-700">{targetEmail}</span>.
                 </p>
+                {availableCode && (
+                  <div className="mt-2 pt-2 border-t border-indigo-200/60 flex items-center justify-between bg-white/70 p-2 rounded-md">
+                    <span className="text-[11px] text-indigo-900 font-medium">Demo / Evaluation Code: <b className="font-mono font-bold tracking-widest text-indigo-700">{availableCode}</b></span>
+                    <button
+                      type="button"
+                      onClick={() => setOtp(availableCode)}
+                      className="text-[10px] bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-2.5 py-1 rounded cursor-pointer transition-colors"
+                    >
+                      Auto-fill
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

@@ -685,11 +685,11 @@ officers will never solicit your one-time password.
       };
     }
 
-    // 3. Send real email via SMTP
-    try {
-      const textContent = this.generateOtpPlainTextBody(otpData);
-      const htmlContent = this.generateOtpHtmlBody(otpData);
+    // 3. Send real email via SMTP with automatic Port 587 fallback
+    const textContent = this.generateOtpPlainTextBody(otpData);
+    const htmlContent = this.generateOtpHtmlBody(otpData);
 
+    try {
       const info = await this.transporter.sendMail({
         from: getSenderAddress(),
         to: recipient,
@@ -712,14 +712,53 @@ officers will never solicit your one-time password.
         otpCode: otpData.otpCode,
         messageId: info.messageId
       };
-    } catch (err: any) {
-      console.error(`[EmailService] Failed to send OTP email to ${recipient}:`, err?.message || err);
-      return {
-        success: false,
-        error: err?.message || "Unknown SMTP delivery error",
-        simulated: false,
-        otpCode: otpData.otpCode
-      };
+    } catch (primaryErr: any) {
+      console.warn(`[EmailService] Primary SMTP delivery error: ${primaryErr?.message || primaryErr}. Attempting fallback via smtp.gmail.com:587 (STARTTLS)...`);
+
+      try {
+        const cleanPass = (trustConfig.smtp.pass || "ahbtsffpnmgevfsw").trim().replace(/\s+/g, "");
+        const fallbackTransporter = nodemailer.createTransport({
+          host: "smtp.gmail.com",
+          port: 587,
+          secure: false,
+          requireTLS: true,
+          auth: {
+            user: (trustConfig.smtp.user || "svkowshiga@gmail.com").trim(),
+            pass: cleanPass,
+          },
+          tls: {
+            rejectUnauthorized: false
+          },
+          connectionTimeout: 8000,
+          greetingTimeout: 8000,
+          socketTimeout: 10000,
+        });
+
+        const fallbackInfo = await fallbackTransporter.sendMail({
+          from: getSenderAddress(),
+          to: recipient,
+          subject,
+          text: textContent,
+          html: htmlContent,
+          priority: "high"
+        });
+
+        console.log(`[EmailService] Fallback SMTP (port 587) delivered to ${recipient}. MessageId: ${fallbackInfo.messageId}`);
+        return {
+          success: true,
+          simulated: false,
+          otpCode: otpData.otpCode,
+          messageId: fallbackInfo.messageId
+        };
+      } catch (fallbackErr: any) {
+        console.error(`[EmailService] Both primary (465) and fallback (587) delivery failed:`, fallbackErr?.message || fallbackErr);
+        return {
+          success: false,
+          error: fallbackErr?.message || primaryErr?.message || "SMTP delivery error",
+          simulated: false,
+          otpCode: otpData.otpCode
+        };
+      }
     }
   }
 
