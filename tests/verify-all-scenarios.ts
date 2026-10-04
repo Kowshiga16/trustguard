@@ -309,7 +309,7 @@ async function runAllTests() {
     const reqOtpData = await reqOtpRes.json();
 
     if (reqOtpRes.ok && reqOtpData.success) {
-      console.log(`  [PASS] Step-Up OTP dispatched via NodeMailer to registered recipient (${reqOtpData.targetRecipient || "svkowshiga@gmail.com"}).`);
+      console.log(`  [PASS] Step-Up OTP dispatched via NodeMailer to registered recipient (${reqOtpData.targetRecipient || "kowshiga931@gmail.com"}).`);
       passed++;
     } else {
       console.error("  [FAIL] Step-Up OTP request failed:", reqOtpData);

@@ -1121,7 +1121,7 @@ export default function RecordsPortal({
                     <span className="font-bold text-indigo-950 block text-[11px]">Step-Up Verification Code Dispatched:</span>
                     <p className="text-slate-600 leading-normal text-[11px]">
                       A 6-digit OTP code has been sent to your registered mailbox:
-                      <b className="font-mono text-indigo-900 block mt-0.5 break-all">{session?.userEmail || session?.userName || "svkowshiga@gmail.com"}</b>
+                      <b className="font-mono text-indigo-900 block mt-0.5 break-all">{session?.userEmail || session?.userName || "kowshiga931@gmail.com"}</b>
                     </p>
                   </div>
                 </div>

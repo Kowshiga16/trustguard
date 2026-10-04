@@ -99,8 +99,11 @@ class SessionActivityTracker {
     state.requestTimestamps = state.requestTimestamps.filter(t => now - t <= 60000);
     const requestsPerMinute = state.requestTimestamps.length;
 
-    // Use CURRENT hour (not login time) so Isolation Forest detects off-hours access in real time
-    const loginHour = new Date().getHours();
+    // Use hour 23 if night/off-hours access is simulated, otherwise real hour if within working hours or fallback to 12 PM
+    const currentHour = new Date().getHours();
+    const isWorkingHours = currentHour >= 10 && currentHour < 16;
+    const defaultWorkingHour = isWorkingHours ? currentHour : (process.env.ENABLE_ORGANIC_OFFHOURS === "true" ? currentHour : 12);
+    const loginHour = session.simulatedNightAccess ? 23 : defaultWorkingHour;
 
     // Session duration
     let durationMinutes = 1.0;

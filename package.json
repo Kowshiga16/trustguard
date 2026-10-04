@@ -12,6 +12,7 @@
     "test": "tsx --test tests/trust-alert.test.ts tests/approval-flow.test.js tests/hybrid-trust.test.ts",
     "test:all": "tsx --test tests/trust-alert.test.ts tests/approval-flow.test.js tests/hybrid-trust.test.ts tests/verify-all-scenarios.ts",
     "verify": "tsx --test tests/verify-all-scenarios.ts",
+    "seed": "node scripts/seed_atlas.mjs",
     "check-db": "node scripts/check_mongo.mjs"
   },
   "dependencies": {

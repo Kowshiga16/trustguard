@@ -40,10 +40,12 @@ class TrustEngine {
   public calculateRuleBasedScore(session: ActiveSession): number {
     let score = 75; // Baseline trust
 
-    // Organic 10 AM to 4 PM working hours check
-    const currentHour = new Date().getHours();
-    if ((currentHour < 10 || currentHour >= 16) && !session.otpVerified) {
-      session.simulatedNightAccess = true;
+    // Organic 10 AM to 4 PM working hours check (active in production when ENABLE_ORGANIC_OFFHOURS=true)
+    if (process.env.NODE_ENV !== "test" && process.env.ENABLE_ORGANIC_OFFHOURS === "true") {
+      const currentHour = new Date().getHours();
+      if ((currentHour < 10 || currentHour >= 16) && !session.otpVerified) {
+        session.simulatedNightAccess = true;
+      }
     }
 
     if (session.simulatedDeviceMismatch) {

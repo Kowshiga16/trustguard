@@ -66,7 +66,170 @@ const villages: Village[] = [
   { id: "v5", name: "Gudalur", taluk: "Coimbatore South", district: "Coimbatore" },
 ];
 
-const users: User[] = [];
+const DEFAULT_PASSWORD_HASH = "$2b$10$JYbn94UeUTp7EGNdpHCLYucb99z.bn3NDklzw.Si8BoHrupEaW4yG"; // Bcrypt hash for "Password@123"
+
+export const DEFAULT_USERS: User[] = [
+  {
+    id: "u_admin_001",
+    name: "Admin Shrinivas",
+    email: "admin@trustguard.gov.in",
+    passwordHash: DEFAULT_PASSWORD_HASH,
+    roleName: RoleName.SystemAdministrator,
+    phone: "9840011223",
+    assignedJurisdiction: {
+      district: "Kancheepuram",
+      taluk: "Tambaram",
+      villageId: "v1"
+    },
+    registeredDevice: "Admin-Workstation",
+    properties: [],
+    status: "Active"
+  },
+  {
+    id: "u_tahsildar_001",
+    name: "Raj Kumar",
+    email: "raj.kumar@revenue.tn.gov.in",
+    passwordHash: DEFAULT_PASSWORD_HASH,
+    roleName: RoleName.Tahsildar,
+    phone: "9840122334",
+    assignedJurisdiction: {
+      district: "Kancheepuram",
+      taluk: "Tambaram",
+      villageId: "v1"
+    },
+    registeredDevice: "Tahsildar-Laptop",
+    properties: [],
+    status: "Active"
+  },
+  {
+    id: "u_dt_001",
+    name: "Suresh Pillai",
+    email: "suresh.pillai@revenue.tn.gov.in",
+    passwordHash: DEFAULT_PASSWORD_HASH,
+    roleName: RoleName.DeputyTahsildar,
+    phone: "9840233445",
+    assignedJurisdiction: {
+      district: "Kancheepuram",
+      taluk: "Tambaram",
+      villageId: "v1"
+    },
+    registeredDevice: "Deputy-Laptop",
+    properties: [],
+    status: "Active"
+  },
+  {
+    id: "u_ri_001",
+    name: "Anitha Sundaram",
+    email: "anitha.ri@revenue.tn.gov.in",
+    passwordHash: DEFAULT_PASSWORD_HASH,
+    roleName: RoleName.RevenueInspector,
+    phone: "9840344556",
+    assignedJurisdiction: {
+      district: "Kancheepuram",
+      taluk: "Tambaram",
+      villageId: "v1"
+    },
+    registeredDevice: "RI-Field-Tablet",
+    properties: [],
+    status: "Active"
+  },
+  {
+    id: "u_vao_001",
+    name: "Balaji Rajan",
+    email: "balaji.vao@revenue.tn.gov.in",
+    passwordHash: DEFAULT_PASSWORD_HASH,
+    roleName: RoleName.VillageAdministrativeOfficer,
+    phone: "9840455667",
+    assignedJurisdiction: {
+      district: "Kancheepuram",
+      taluk: "Tambaram",
+      villageId: "v1"
+    },
+    registeredDevice: "VAO-Terminal-01",
+    properties: [],
+    status: "Active"
+  },
+  {
+    id: "u_deo_001",
+    name: "Kavitha Selvam",
+    email: "kavitha.deo@revenue.tn.gov.in",
+    passwordHash: DEFAULT_PASSWORD_HASH,
+    roleName: RoleName.DataEntryOperator,
+    phone: "9840566778",
+    assignedJurisdiction: {
+      district: "Kancheepuram",
+      taluk: "Tambaram",
+      villageId: "v1"
+    },
+    registeredDevice: "DEO-Desktop-02",
+    properties: [],
+    status: "Active"
+  },
+  {
+    id: "u_citizen_001",
+    name: "Ramesh Kumar",
+    email: "ramesh.citizen@gmail.com",
+    passwordHash: DEFAULT_PASSWORD_HASH,
+    roleName: RoleName.Citizen,
+    phone: "+91 98450 11223",
+    assignedJurisdiction: {
+      district: "Kancheepuram",
+      taluk: "Tambaram",
+      villageId: "v1"
+    },
+    registeredDevice: "Citizen-Mobile",
+    properties: [
+      {
+        id: "rec1",
+        surveyNumber: "102/1",
+        ownerName: "Ramesh Kumar",
+        ownerPhone: "+91 98450 11223",
+        villageId: "v1",
+        villageName: "Mudichur",
+        area: "1.8 Acres",
+        landType: "Agricultural",
+        status: "Active",
+        pattaNumber: "Patta-102-001",
+        chittaNumber: "Chitta-102-001"
+      }
+    ],
+    status: "Active"
+  },
+  {
+    id: "u_officer_test",
+    name: "Test Officer",
+    email: "officer.test@revenue.tn.gov.in",
+    passwordHash: DEFAULT_PASSWORD_HASH,
+    roleName: RoleName.VillageAdministrativeOfficer,
+    phone: "9998887776",
+    assignedJurisdiction: {
+      district: "Kancheepuram",
+      taluk: "Tambaram",
+      villageId: "v1"
+    },
+    registeredDevice: "Test-Device",
+    properties: [],
+    status: "Active"
+  },
+  {
+    id: "u_tahsildar_test",
+    name: "Test Tahsildar",
+    email: "tahsildar@test.local",
+    passwordHash: DEFAULT_PASSWORD_HASH,
+    roleName: RoleName.Tahsildar,
+    phone: "997688045",
+    assignedJurisdiction: {
+      district: "Kancheepuram",
+      taluk: "Tambaram",
+      villageId: "v1"
+    },
+    registeredDevice: "Tahsildar-Laptop",
+    properties: [],
+    status: "Active"
+  }
+];
+
+let users: User[] = [...DEFAULT_USERS];
 
 let landRecords: LandRecord[] = [
   { 
@@ -273,6 +436,48 @@ let mutations: MutationRequest[] = [
   }
 ];
 
+async function seedUsersIntoMongoCollection() {
+  if (!mongoDb) return;
+
+  const collection = mongoDb.collection<User>("users");
+  for (const user of DEFAULT_USERS) {
+    const existing = await collection.findOne({ 
+      $or: [{ email: user.email.toLowerCase() }, { id: user.id }] 
+    });
+    if (!existing) {
+      await collection.insertOne({ ...user });
+      console.log(`[MongoDB Atlas] Seeded default user: ${user.email} (${user.roleName})`);
+    }
+  }
+}
+
+async function seedLandRecordsIntoMongoCollection() {
+  if (!mongoDb) return;
+
+  const collection = mongoDb.collection<LandRecord>("land_records");
+  const count = await collection.countDocuments({});
+  if (count === 0) {
+    await collection.insertMany(landRecords);
+    console.log(`[MongoDB Atlas] Seeded ${landRecords.length} default land records into Atlas`);
+  } else {
+    const dbRecords = await collection.find({}).toArray();
+    if (dbRecords.length) {
+      landRecords = dbRecords;
+    }
+  }
+}
+
+async function seedVillagesIntoMongoCollection() {
+  if (!mongoDb) return;
+
+  const collection = mongoDb.collection<Village>("villages");
+  const count = await collection.countDocuments({});
+  if (count === 0) {
+    await collection.insertMany(villages);
+    console.log(`[MongoDB Atlas] Seeded ${villages.length} villages into Atlas`);
+  }
+}
+
 async function seedMutationsIntoMongoCollection() {
   if (!mongoDb) return;
 
@@ -280,6 +485,7 @@ async function seedMutationsIntoMongoCollection() {
   const existingCount = await collection.countDocuments({});
   if (existingCount === 0) {
     await collection.insertMany(mutations);
+    console.log(`[MongoDB Atlas] Seeded ${mutations.length} default mutations into Atlas`);
   }
 }
 
@@ -574,6 +780,9 @@ async function updateSessionTrust(
 async function startServer() {
   await initMongo();
   if (mongoDb) {
+    await seedUsersIntoMongoCollection();
+    await seedVillagesIntoMongoCollection();
+    await seedLandRecordsIntoMongoCollection();
     await seedMutationsIntoMongoCollection();
     await loadUsersFromMongoIntoMemory();
     await loadMutationsFromMongoIntoMemory();
@@ -700,6 +909,16 @@ async function startServer() {
 
       const computedScore = session.currentTrustScore;
       const isWriteAction = ["POST", "PUT", "DELETE"].includes(req.method);
+      const isAlertUpdate = req.path.startsWith("/api/security/alerts");
+      const isSensitiveWrite = isWriteAction && !isAlertUpdate;
+
+      // Separation of Duties / RBAC enforcement: Super Admin cannot alter land records
+      if (session.role === RoleName.SystemAdministrator && req.path.startsWith("/api/records") && isWriteAction) {
+        return res.status(403).json({
+          error: "forbidden",
+          message: "Security Constraint: System Administrator is barred from altering land database rows (Separation of Duties)."
+        });
+      }
 
       // Phase 14 & 15 Access Decision Logic
       // 0-50: TERMINATE_SESSION
@@ -736,7 +955,7 @@ async function startServer() {
       }
 
       // 51-60: OTP_REQUIRED (Step-up verification required for sensitive operations)
-      if (computedScore >= 51 && computedScore <= 60 && isWriteAction && !session.otpVerified) {
+      if (computedScore >= 51 && computedScore <= 60 && isSensitiveWrite && !session.otpVerified) {
         const activeOtp = sessionOtpCodes.get(session.id);
         if (!activeOtp || Date.now() >= activeOtp.expiresAt) {
           void issueOtpForSession(session, `Zero Trust Step-Up (Score: ${computedScore})`);
@@ -773,7 +992,7 @@ async function startServer() {
       }
 
       // 61-75: READ_ONLY (Writes completely blocked, cannot be bypassed with OTP)
-      if (computedScore >= 61 && computedScore <= 75 && isWriteAction) {
+      if (computedScore >= 61 && computedScore <= 75 && isSensitiveWrite) {
         session.failedActionCount += 1;
         await updateSessionTrust(session, "Unauthorized Write Attempt", req.path);
 
