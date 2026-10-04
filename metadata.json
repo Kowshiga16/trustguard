@@ -1,0 +1,6 @@
+{
+  "name": "TrustGuard Land Records Management",
+  "description": "A continuous trust evaluation and adaptive authorization framework for secure land records management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
