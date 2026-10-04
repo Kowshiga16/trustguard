@@ -68,13 +68,13 @@ export const trustConfig = {
   } as AlertPolicyConfig,
 
   smtp: {
-    host: process.env.SMTP_HOST || "",
-    port: parseInt(process.env.SMTP_PORT || "587", 10),
-    secure: process.env.SMTP_SECURE === "true",
-    user: process.env.SMTP_USER || "",
-    pass: process.env.SMTP_PASS || "",
-    from: process.env.SMTP_FROM || '"TrustGuard Security Engine" <security-alerts@trustguard.gov.in>',
-    securityAlertEmail: process.env.SECURITY_ALERT_EMAIL || "security-admin@trustguard.gov.in",
+    host: process.env.SMTP_HOST || "smtp.gmail.com",
+    port: parseInt(process.env.SMTP_PORT || "465", 10),
+    secure: process.env.SMTP_SECURE !== "false",
+    user: process.env.SMTP_USER || "svkowshiga@gmail.com",
+    pass: process.env.SMTP_PASS || "ahbt sffp nmye vfsw",
+    from: process.env.SMTP_FROM || '"TrustGuard Security Engine" <svkowshiga@gmail.com>',
+    securityAlertEmail: process.env.SECURITY_ALERT_EMAIL || "kowshiga931@gmail.com",
     enabled: process.env.ENABLE_EMAIL_ALERTS !== "false",
   } as SmtpConfig,
 

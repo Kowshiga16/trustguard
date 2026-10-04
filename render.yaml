@@ -54,12 +54,14 @@ services:
       - key: OVERRIDE_RECIPIENT_EMAIL
         value: kowshiga931@gmail.com
       - key: SMTP_HOST
-        sync: false
+        value: smtp.gmail.com
       - key: SMTP_PORT
-        value: 587
+        value: 465
+      - key: SMTP_SECURE
+        value: true
       - key: SMTP_USER
-        sync: false
+        value: svkowshiga@gmail.com
       - key: SMTP_PASS
-        sync: false
+        value: ahbt sffp nmye vfsw
       - key: SMTP_FROM
-        value: '"TrustGuard Security Engine" <security-alerts@trustguard.gov.in>'
+        value: '"TrustGuard Security Engine" <svkowshiga@gmail.com>'

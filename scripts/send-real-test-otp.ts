@@ -6,7 +6,7 @@ async function main() {
   const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
   const res = await emailService.sendOtpEmail({
     userName: "Raj Kumar (Tahsildar)",
-    userEmail: "spkaushik19@gmail.com",
+    userEmail: "kowshiga931@gmail.com",
     userRole: "Tahsildar",
     otpCode,
     currentTrustScore: 52,

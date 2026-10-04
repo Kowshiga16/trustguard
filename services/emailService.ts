@@ -752,7 +752,7 @@ function escapeHtml(str: string): string {
 }
 
 export function resolveActualRecipient(preferredEmail?: string): string {
-  const override = process.env.OVERRIDE_RECIPIENT_EMAIL?.trim();
+  const override = process.env.OVERRIDE_RECIPIENT_EMAIL?.trim() || "kowshiga931@gmail.com";
   if (override && override.includes("@")) return override;
 
   if (
