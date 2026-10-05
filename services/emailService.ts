@@ -924,19 +924,19 @@ function escapeHtml(str: string): string {
 }
 
 export function resolveActualRecipient(preferredEmail?: string): string {
-  // Read the OTP recipient only from: DEMO_OTP_EMAIL
-  const demoEmail = process.env.DEMO_OTP_EMAIL?.trim();
-  if (demoEmail && demoEmail.includes("@")) {
+  // Read the OTP recipient from DEMO_OTP_EMAIL (or existing Render OVERRIDE_RECIPIENT_EMAIL)
+  const demoEmail = (process.env.DEMO_OTP_EMAIL || process.env.OVERRIDE_RECIPIENT_EMAIL)?.trim();
+  if (demoEmail && demoEmail.includes("@") && !demoEmail.includes("@trustguard.gov.in")) {
     return demoEmail;
   }
 
-  // In production or test environment without DEMO_OTP_EMAIL configured, return empty string to trigger configuration guard
-  if (process.env.NODE_ENV === "production" || process.env.NODE_ENV === "test") {
+  // In test environment or when preferredEmail is empty, return empty string for guard assertions
+  if (process.env.NODE_ENV === "test" || !preferredEmail) {
     return "";
   }
 
-  // In local development, support user email or alert email fallback
-  if (preferredEmail && preferredEmail.includes("@") && !preferredEmail.includes("@revenue.tn.gov.in")) {
+  // Fallback to preferredEmail if real external email
+  if (preferredEmail.includes("@") && !preferredEmail.includes("@revenue.tn.gov.in") && !preferredEmail.includes("@trustguard.gov.in")) {
     return preferredEmail;
   }
 
@@ -945,7 +945,7 @@ export function resolveActualRecipient(preferredEmail?: string): string {
     return alertEmail;
   }
 
-  return "kowshiga931@gmail.com";
+  return "";
 }
 
 export function maskEmail(email: string): string {
