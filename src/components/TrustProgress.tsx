@@ -4,9 +4,10 @@ import { ActiveSession } from "../types";
 
 interface TrustProgressProps {
   session: ActiveSession | null;
+  onSessionUpdate?: (updatedSession: ActiveSession) => void;
 }
 
-export default function TrustProgress({ session }: TrustProgressProps) {
+export default function TrustProgress({ session, onSessionUpdate }: TrustProgressProps) {
   const [hybridData, setHybridData] = useState<any>(null);
 
   useEffect(() => {
@@ -19,19 +20,26 @@ export default function TrustProgress({ session }: TrustProgressProps) {
         if (res.ok) {
           const data = await res.json();
           setHybridData(data);
+          if (data.finalTrustScore !== undefined && data.finalTrustScore !== session.currentTrustScore) {
+            onSessionUpdate?.({
+              ...session,
+              currentTrustScore: data.finalTrustScore,
+              status: data.finalTrustScore < 40 ? "Blocked" : "Active"
+            });
+          }
         }
       } catch (err) {
         console.error("Failed to fetch hybrid trust", err);
       }
     };
     fetchHybridTrust();
-    const interval = setInterval(fetchHybridTrust, 5000);
+    const interval = setInterval(fetchHybridTrust, 2500);
     return () => clearInterval(interval);
-  }, [session?.id]);
+  }, [session?.id, session?.currentTrustScore]);
 
   if (!session) return null;
 
-  const score = session.currentTrustScore;
+  const score = hybridData?.finalTrustScore !== undefined ? hybridData.finalTrustScore : session.currentTrustScore;
 
   // Phase 14 mappings
   let bandName = "Unknown";

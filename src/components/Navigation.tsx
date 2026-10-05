@@ -40,6 +40,7 @@ export default function Navigation({
           <div className="flex items-center gap-4">
             <div className="text-right hidden sm:block">
               <span className="block text-xs font-bold text-slate-800">{session.userName}</span>
+              <span className="block text-[11px] font-semibold text-indigo-700 font-mono">{session.userEmail || "kowshiga931@gmail.com"}</span>
               <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                 Role: <b className="text-indigo-600 uppercase tracking-wider font-extrabold">{session.role.replace("Administrative ", "")}</b>
               </span>

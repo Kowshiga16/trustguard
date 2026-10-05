@@ -9,8 +9,8 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test tests/trust-alert.test.ts tests/approval-flow.test.js tests/hybrid-trust.test.ts",
-    "test:all": "tsx --test tests/trust-alert.test.ts tests/approval-flow.test.js tests/hybrid-trust.test.ts tests/verify-all-scenarios.ts",
+    "test": "tsx --test tests/trust-alert.test.ts tests/approval-flow.test.js tests/hybrid-trust.test.ts tests/verify-all-criteria-realtime.ts",
+    "test:all": "tsx --test tests/trust-alert.test.ts tests/approval-flow.test.js tests/hybrid-trust.test.ts tests/verify-all-criteria-realtime.ts tests/verify-all-scenarios.ts",
     "verify": "tsx --test tests/verify-all-scenarios.ts",
     "seed": "node scripts/seed_atlas.mjs",
     "check-db": "node scripts/check_mongo.mjs"

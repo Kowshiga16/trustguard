@@ -504,7 +504,14 @@ export default function RecordsPortal({
             <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
               {filteredRecords.map((rec) => (
                 <tr key={rec.id} className="hover:bg-slate-50/40 transition-colors">
-                  <td className="py-3.5 px-4 font-mono font-bold text-slate-900">{rec.surveyNumber}</td>
+                  <td className="py-3.5 px-4 font-mono font-bold text-slate-900">
+                    {rec.surveyNumber}
+                    {(rec as any).isCrossJurisdiction && (
+                      <span className="block mt-0.5 text-[9px] font-black uppercase text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded w-max">
+                        Cross-Jurisdiction
+                      </span>
+                    )}
+                  </td>
                   <td className="py-3.5 px-4 font-semibold text-slate-800">{rec.ownerName}</td>
                   <td className="py-3.5 px-4 text-slate-500 font-medium">
                     {rec.villageName}

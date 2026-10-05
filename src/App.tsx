@@ -136,6 +136,50 @@ export default function App() {
     initSystem();
   }, []);
 
+  // 1b. Real-time background telemetry sync for active session
+  useEffect(() => {
+    if (!session?.id) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const sessRes = await safeFetchJson<any>("/api/auth/current-session", {
+          headers: { "Authorization": session.id }
+        });
+        if (sessRes.ok && sessRes.data) {
+          const freshSession = sessRes.data.session || sessRes.data;
+          setSession((prev) => {
+            if (!prev) return freshSession;
+            if (
+              prev.currentTrustScore !== freshSession.currentTrustScore ||
+              prev.status !== freshSession.status ||
+              prev.failedActionCount !== freshSession.failedActionCount ||
+              prev.otpVerified !== freshSession.otpVerified ||
+              prev.simulatedOutsideJurisdiction !== freshSession.simulatedOutsideJurisdiction ||
+              prev.simulatedSpamTriggered !== freshSession.simulatedSpamTriggered
+            ) {
+              return { ...prev, ...freshSession };
+            }
+            return prev;
+          });
+        }
+
+        // Periodically refresh audit & trust logs
+        const [tLogsRes, aLogsRes, statsRes] = await Promise.all([
+          safeFetchJson<any[]>("/api/security/trust-logs"),
+          safeFetchJson<any[]>("/api/security/audit-logs"),
+          safeFetchJson<SystemStats>("/api/system/stats")
+        ]);
+        if (tLogsRes.ok && Array.isArray(tLogsRes.data)) setTrustLogs(tLogsRes.data);
+        if (aLogsRes.ok && Array.isArray(aLogsRes.data)) setAuditLogs(aLogsRes.data);
+        if (statsRes.ok && statsRes.data) setStats(statsRes.data);
+      } catch (err) {
+        // quiet background sync
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [session?.id]);
+
   // 2. Load all records, logs and stats linked to a session
   async function loadSessionData(token: string) {
     try {
@@ -979,6 +1023,7 @@ export default function App() {
                 records={records}
                 applications={applications}
                 onSubmitApplication={handleSubmitApplication}
+                onSessionUpdate={(updated) => setSession({ ...updated })}
               />
             )}
 
@@ -1091,7 +1136,10 @@ export default function App() {
 
         {/* Right Side: Threat Sandbox Console (4 cols) */}
         <div className="lg:col-span-4 space-y-6">
-          <TrustProgress session={session} />
+          <TrustProgress 
+            session={session} 
+            onSessionUpdate={(updated) => setSession({ ...updated })} 
+          />
           
           <ThreatSimulator
             session={session}

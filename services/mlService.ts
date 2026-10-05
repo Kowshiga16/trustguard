@@ -132,11 +132,11 @@ class MLService {
       reasons.push(`Off-hours access anomaly (hour ${features.login_hour}:00 outside baseline 07:00-19:00)`);
     }
 
-    // 6. Rapid spam simulation trigger
-    if (session.simulatedSpamTriggered) {
-      deviationSum += 0.45;
+    // 6. Rapid spam or rate limit violation trigger
+    if (session.simulatedSpamTriggered || sessionActivityTracker.isRateLimitExceeded(session.id)) {
+      deviationSum += 0.55;
       if (!reasons.some(r => r.includes("rate"))) {
-        reasons.push("Burst API request spike detected");
+        reasons.push("Burst API request velocity spike detected");
       }
     }
 

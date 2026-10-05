@@ -1407,7 +1407,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.get("/api/auth/current-session", (req, res) => {
+  app.get("/api/auth/current-session", async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader) {
       return res.status(401).json({ error: "Missing session token" });
@@ -1416,7 +1416,31 @@ async function startServer() {
     if (!session) {
       return res.status(401).json({ error: "Session not active" });
     }
-    res.json(session);
+
+    // Passive real-time telemetry detection
+    const currentIp = ((req.headers['x-forwarded-for'] as string)?.split(',')[0].trim()) || 
+                      req.socket.remoteAddress || 
+                      req.ip || 
+                      "127.0.0.1";
+    const currentUserAgent = (req.headers['user-agent'] as string) || "Unknown";
+
+    if (session.realLoginIp && currentIp !== session.realLoginIp && !session.otpVerified) {
+      session.simulatedIpMismatch = true;
+    }
+    if (session.realLoginUserAgent && currentUserAgent !== session.realLoginUserAgent && !session.otpVerified) {
+      session.simulatedDeviceMismatch = true;
+    }
+
+    const user = users.find(u => u.id === session.userId);
+    const evaluation = await trustEngine.evaluateSessionTrust(session, "Real-time Telemetry Polling", user, "/api/auth/current-session");
+    
+    // Enrich with latest hybrid trust metrics
+    const hybridData = evaluation.hybridResult;
+
+    res.json({
+      ...session,
+      hybridData
+    });
   });
 
   // 2. Continuous Trust Engine Simulation Endpoints
@@ -1608,6 +1632,10 @@ async function startServer() {
       session.otpVerified = true;
       session.status = "Active";
       session.failedActionCount = 0;
+      session.simulatedDeviceMismatch = false;
+      session.simulatedIpMismatch = false;
+      session.simulatedOutsideJurisdiction = false;
+      session.simulatedSpamTriggered = false;
 
       // Synchronize current IP and User Agent so they match the verified session
       const currentIp = ((req.headers['x-forwarded-for'] as string)?.split(',')[0].trim()) || req.ip || session.ipAddress;
@@ -1650,6 +1678,7 @@ async function startServer() {
       res.json({ success: true, session });
     } else {
       session.failedActionCount = (session.failedActionCount || 0) + 1;
+      sessionActivityTracker.recordFailedOperation(sessionId);
       if (storedOtp) {
         storedOtp.attempts = (storedOtp.attempts || 0) + 1;
       }
@@ -1815,37 +1844,23 @@ async function startServer() {
     }
 
     let filtered = [...landRecords];
+    const includeAll = req.query.includeAll === "true" || req.query.scope === "all";
 
-    // Citizen Role: can only view their own records
+    // Citizen Role: can view their own records by default, or all village records if catalog=true / includeAll
     if (session.role === RoleName.Citizen) {
-      filtered = landRecords.filter(r => r.ownerName === user.name);
+      if (req.query.catalog === "true" || includeAll) {
+        const vId = user.assignedJurisdiction?.villageId;
+        filtered = vId ? landRecords.filter(r => r.villageId === vId) : landRecords;
+      } else {
+        filtered = landRecords.filter(r => r.ownerName === user.name);
+      }
     } 
-    // Jurisdictional access limits
+    // Jurisdictional access limits: officers can see all records so they can test/inspect cross-jurisdiction records
     else if (session.role === RoleName.VillageAdministrativeOfficer) {
-      const vId = user.assignedJurisdiction.villageId;
-      if (session.simulatedOutsideJurisdiction) {
-        filtered = landRecords;
-      } else {
-        filtered = landRecords.filter(r => r.villageId === vId);
-      }
+      filtered = landRecords;
     } 
-    else if (session.role === RoleName.RevenueInspector) {
-      const taluk = user.assignedJurisdiction.taluk;
-      if (session.simulatedOutsideJurisdiction) {
-        filtered = landRecords;
-      } else {
-        const vilIds = villages.filter(v => v.taluk === taluk).map(v => v.id);
-        filtered = landRecords.filter(r => vilIds.includes(r.villageId));
-      }
-    }
-    else if (session.role === RoleName.DeputyTahsildar || session.role === RoleName.Tahsildar) {
-      const taluk = user.assignedJurisdiction.taluk;
-      if (session.simulatedOutsideJurisdiction) {
-        filtered = landRecords;
-      } else {
-        const vilIds = villages.filter(v => v.taluk === taluk).map(v => v.id);
-        filtered = landRecords.filter(r => vilIds.includes(r.villageId));
-      }
+    else if (session.role === RoleName.RevenueInspector || session.role === RoleName.DeputyTahsildar || session.role === RoleName.Tahsildar) {
+      filtered = landRecords;
     }
     else if (session.role === RoleName.SystemAdministrator) {
       // System Admins have separation of duties: can view dashboard, but cannot view/modify actual land records values!
@@ -1877,21 +1892,37 @@ async function startServer() {
       filtered = filtered.filter(r => r.verificationStatus === verificationStatus);
     }
 
+    // Enrich each record with live zero-trust contextual flags
+    const enriched = filtered.map(r => {
+      let isCross = false;
+      if (session.role === RoleName.VillageAdministrativeOfficer) {
+        isCross = Boolean(user.assignedJurisdiction?.villageId && r.villageId !== user.assignedJurisdiction.villageId);
+      } else if (session.role === RoleName.RevenueInspector || session.role === RoleName.DeputyTahsildar) {
+        isCross = Boolean(user.assignedJurisdiction?.taluk && r.taluk && r.taluk.toLowerCase() !== user.assignedJurisdiction.taluk.toLowerCase());
+      } else if (session.role === RoleName.Citizen) {
+        isCross = Boolean(user.name && r.ownerName !== user.name);
+      }
+      return {
+        ...r,
+        isCrossJurisdiction: isCross
+      };
+    });
+
     // Log the read audit entry
     const audit: AuditLog = {
       id: `al_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       userId: session.userId,
       userName: session.userName,
       role: session.role,
-      actionPerformed: `READ_LAND_RECORDS: returned ${filtered.length} records`,
+      actionPerformed: `READ_LAND_RECORDS: returned ${enriched.length} records`,
       resourceAccessed: "LAND_DB_TABLE",
       trustScoreAtAction: session.currentTrustScore,
       decision: "ALLOWED",
       timestamp: new Date().toISOString()
     };
     auditLogs.unshift(audit);
-    sessionActivityTracker.recordRecordView(session.id, filtered.length);
-    res.json(filtered);
+    sessionActivityTracker.recordRecordView(session.id, enriched.length);
+    res.json(enriched);
   });
 
   // Single record detail view endpoint
@@ -1954,8 +1985,8 @@ async function startServer() {
 
     // 4. Record behavioral activity for Scikit-Learn Isolation Forest tracker
     sessionActivityTracker.recordRecordView(session.id, 1, record.id);
-    const roleRateExceeded = sessionActivityTracker.checkRoleDocumentRate(session.id, session.role);
-    if (roleRateExceeded) {
+    const roleRateCheck = sessionActivityTracker.checkRoleDocumentRate(session.id, session.role);
+    if (!roleRateCheck.withinLimit) {
       session.simulatedSpamTriggered = true;
     }
 
@@ -1972,8 +2003,21 @@ async function startServer() {
       }
     }
 
-    // 5. Dynamic Zero Trust & Isolation Forest Evaluation
-    const evaluation = await trustEngine.evaluateSessionTrust(session, `Document View: Survey ${record.surveyNumber}`, user, req.path);
+    // Real-Time Unauthorized Citizen Access Check
+    const isCitizenUnauthorized = session.role === RoleName.Citizen && Boolean(user && record.ownerName !== user.name);
+    if (isCitizenUnauthorized) {
+      session.failedActionCount = (session.failedActionCount || 0) + 1;
+      sessionActivityTracker.recordFailedOperation(session.id);
+    }
+
+    // 5. Dynamic Zero Trust & Isolation Forest Evaluation (Atomic, real-time)
+    const evalEventDesc = isCitizenUnauthorized 
+      ? `Unauthorized Citizen Document Access Attempt: Survey ${record.surveyNumber}`
+      : (session.simulatedOutsideJurisdiction 
+          ? `Cross-Jurisdiction Document View: Survey ${record.surveyNumber}` 
+          : `Document View: Survey ${record.surveyNumber}`);
+
+    const evaluation = await trustEngine.evaluateSessionTrust(session, evalEventDesc, user, req.path);
     const hr = evaluation.hybridResult;
 
     // 6. RBAC & Separation of Duties Policy Enforcement
@@ -2008,12 +2052,8 @@ async function startServer() {
       });
     }
 
-    // 6b. Citizen role: only allow their own record
-    if (session.role === RoleName.Citizen && user && record.ownerName !== user.name) {
-      session.failedActionCount = (session.failedActionCount || 0) + 1;
-      sessionActivityTracker.recordFailedOperation(session.id);
-      void updateSessionTrust(session, "Unauthorized Citizen Land Document Access Attempt", req.path);
-
+    // 6b. Citizen role: only allow their own record (Deny access and return updated trust score)
+    if (isCitizenUnauthorized) {
       const deniedAudit: AuditLog = {
         id: `al_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
         userId: session.userId,
