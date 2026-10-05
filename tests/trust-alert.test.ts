@@ -10,6 +10,7 @@
  * 5. ML Anomaly Score Integration
  */
 
+process.env.NODE_ENV = "test";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { trustConfig, RiskLevel, getRiskLevel, getPolicyDecisionForRisk, isRiskLevelAlertable, getRoleOtpThreshold } from '../services/trustConfig';

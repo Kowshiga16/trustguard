@@ -156,6 +156,64 @@ export default function TrustProgress({ session, onSessionUpdate }: TrustProgres
             </div>
           </div>
         )}
+        {/* Real-time IP & Network Route Shift Telemetry */}
+        <div className="bg-slate-850/80 rounded-lg p-3 border border-slate-800 text-[10px] space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+              <Activity className="w-3.5 h-3.5 text-indigo-400" /> Network Route Telemetry
+            </span>
+            <span className={`px-2 py-0.5 rounded font-bold text-[9px] ${
+              session.simulatedIpMismatch 
+                ? "bg-rose-500/20 text-rose-300 border border-rose-500/40" 
+                : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+            }`}>
+              {session.simulatedIpMismatch ? "Route Shift: -15 pts" : "Verified: Match (0 pts)"}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 font-mono text-[10px]">
+            <div className="bg-slate-900/60 p-2 rounded border border-slate-800">
+              <span className="text-slate-500 block text-[9px] font-sans">Initial Authenticated IP:</span>
+              <span className="text-slate-200 font-bold truncate block">{session.realLoginIp || session.initialAuthenticatedIp || session.ipAddress}</span>
+            </div>
+            <div className="bg-slate-900/60 p-2 rounded border border-slate-800">
+              <span className="text-slate-500 block text-[9px] font-sans">Current Observed IP:</span>
+              <span className={`font-bold truncate block ${session.simulatedIpMismatch ? "text-rose-400 font-bold" : "text-emerald-400"}`}>
+                {session.currentRequestIp || session.ipAddress}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
+            <span className="text-slate-400 text-[9px]">Criterion 2: IP Address / Route Hop</span>
+            <button
+              onClick={async () => {
+                try {
+                  const res = await fetch("/api/simulation/toggle", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      sessionId: session.id,
+                      param: "simulatedIpMismatch",
+                      value: !session.simulatedIpMismatch
+                    })
+                  });
+                  if (res.ok) {
+                    const fresh = await res.json();
+                    onSessionUpdate?.(fresh);
+                  }
+                } catch (e) {}
+              }}
+              className={`px-2.5 py-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                session.simulatedIpMismatch
+                  ? "bg-emerald-950/60 text-emerald-300 border border-emerald-700/50 hover:bg-emerald-900"
+                  : "bg-rose-950/60 text-rose-300 border border-rose-700/50 hover:bg-rose-900"
+              }`}
+            >
+              {session.simulatedIpMismatch ? "↺ Restore Original IP Route" : "⚡ Test IP Route Shift (-15 pts)"}
+            </button>
+          </div>
+        </div>
 
         <div className="border-t border-slate-800 pt-3 flex-1 mt-1">
           <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Current Behavioral Indicators</h4>

@@ -53,13 +53,18 @@ export default function OtpVerificationModal({
       setResendSuccess(false);
       void onRequestOtp();
 
-      // Query real delivery status from server
-      fetch(`/api/security/otp-status/${session.id}`)
-        .then(res => res.json())
-        .then(data => {
-          if (data.emailStatus) setDeliveryStatus(data.emailStatus);
-        })
-        .catch(() => {});
+      const pollStatus = () => {
+        fetch(`/api/security/otp-status/${session.id}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.emailStatus) setDeliveryStatus(data.emailStatus);
+          })
+          .catch(() => {});
+      };
+
+      pollStatus();
+      const interval = setInterval(pollStatus, 1500);
+      return () => clearInterval(interval);
     }
   }, [session?.id, session?.otpVerified, isOtpNeeded]);
 
@@ -155,12 +160,13 @@ export default function OtpVerificationModal({
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                     deliveryStatus === "SENT" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
                   }`}>
-                    {deliveryStatus === "SENT" ? "✔ Sent via Gmail" : deliveryStatus}
+                    {deliveryStatus === "SENT" ? "✔ Sent to kowshiga931@gmail.com" : (deliveryStatus === "PENDING" ? "⏳ Sending Email..." : deliveryStatus)}
                   </span>
                 </div>
                 <p className="text-slate-600 leading-normal">
                   A 6-digit one-time passcode has been dispatched to your official account:
                   <b className="font-mono text-indigo-900 block mt-0.5 break-all">{session.userEmail || session.userName}</b>
+                  <span className="text-[11px] text-slate-500 block mt-0.5">Evaluation Recipient: <b className="text-indigo-700 font-mono">kowshiga931@gmail.com</b></span>
                 </p>
                 <p className="text-[11px] text-slate-500 italic mt-1">
                   Please check your registered mailbox or <b>Spam folder</b> for the verification code.

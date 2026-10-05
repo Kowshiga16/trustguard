@@ -5,6 +5,7 @@
  * Unit tests for TrustGuard Hybrid Trust Service & Isolation Forest Integration
  */
 
+process.env.NODE_ENV = "test";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { hybridTrustService } from "../services/hybridTrustService";

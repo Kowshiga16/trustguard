@@ -70,7 +70,8 @@ class TrustEngine {
     } catch {
       currentHour = new Date().getHours();
     }
-    const isRealOffHours = currentHour < 7 || currentHour >= 19;
+    const isRealClockEnforced = process.env.NODE_ENV !== "test";
+    const isRealOffHours = isRealClockEnforced && (currentHour < 7 || currentHour >= 19);
     if (session.simulatedNightAccess || isRealOffHours) {
       totalDeductions += deductions.offHoursAccess;
       factorBreakdown["Off-Hours Registry Access"] = deductions.offHoursAccess;

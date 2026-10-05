@@ -178,6 +178,8 @@ export interface ActiveSession {
   otpVerified: boolean;
   realLoginIp?: string;
   realLoginUserAgent?: string;
+  initialAuthenticatedIp?: string;
+  currentRequestIp?: string;
 }
 
 export interface TrustLog {

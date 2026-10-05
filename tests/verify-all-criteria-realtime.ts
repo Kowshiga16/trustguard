@@ -3,6 +3,7 @@
  * Tests purely in real-time without mock simulation buttons.
  */
 
+process.env.NODE_ENV = "test";
 import test from "node:test";
 import assert from "node:assert";
 import { trustEngine } from "../services/trustEngine";

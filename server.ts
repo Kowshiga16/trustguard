@@ -797,10 +797,11 @@ async function updateSessionTrust(
     recordSecurityAlert(evaluation.securityAlert);
   }
 
-  // If final trust score dropped below critical threshold (< 40) and session is not verified,
+  // If final trust score dropped to or below role threshold and session is not verified,
   // challenge session with Step-Up OTP
+  const roleThreshold = getRoleOtpThreshold(session.role);
   if (
-    evaluation.finalScore < criticalThreshold &&
+    evaluation.finalScore <= roleThreshold &&
     !session.otpVerified &&
     eventType !== "OTP Identity Step-Up Succeeded"
   ) {
@@ -808,7 +809,7 @@ async function updateSessionTrust(
     if (!existingOtp || Date.now() >= existingOtp.expiresAt) {
       void issueOtpForSession(
         session,
-        `Critical Degradation: Trust Score (${evaluation.finalScore}) dropped below critical threshold (${criticalThreshold})`
+        `Dynamic Zero Trust Step-Up: Trust Score (${evaluation.finalScore}) dropped below role threshold (${roleThreshold})`
       );
     }
   }
@@ -1333,11 +1334,13 @@ async function startServer() {
 
     sessions = sessions.filter(s => s.userId !== user.id);
 
-    const device = customDevice || user.registeredDevice;
-    const ip = customIp || "192.168.1.104";
+    const clientIp = extractClientIp(req);
+    const clientUa = extractClientUserAgent(req);
+    const initialIp = customIp || clientIp;
+    const device = customDevice || user.registeredDevice || clientUa;
 
     const isDeviceMismatch = Boolean(customDevice && customDevice !== user.registeredDevice);
-    const isIpMismatch = Boolean(customIp && customIp !== "192.168.1.104");
+    const isIpMismatch = Boolean(customIp && customIp !== "192.168.1.104" && customIp !== clientIp);
 
     const jwtToken = jwt.sign({
       sub: user.id,
@@ -1355,7 +1358,7 @@ async function startServer() {
       userEmail: user.email,
       role: user.roleName,
       deviceFingerprint: device,
-      ipAddress: ip,
+      ipAddress: initialIp,
       loginTime: new Date().toISOString(),
       lastActivityTime: new Date().toISOString(),
       currentTrustScore: 100,
@@ -1369,8 +1372,10 @@ async function startServer() {
       simulatedIdleTriggered: false,
       failedActionCount: 0,
       otpVerified: false,
-      realLoginIp: customIp || extractClientIp(req),
-      realLoginUserAgent: customDevice || extractClientUserAgent(req)
+      realLoginIp: initialIp,
+      initialAuthenticatedIp: initialIp,
+      currentRequestIp: clientIp,
+      realLoginUserAgent: customDevice || clientUa
     };
 
     const initialEval = await trustEngine.evaluateSessionTrust(
@@ -1447,6 +1452,8 @@ async function startServer() {
     // Passive real-time telemetry detection
     const currentIp = extractClientIp(req);
     const currentUserAgent = extractClientUserAgent(req);
+    session.currentRequestIp = currentIp;
+    session.ipAddress = currentIp;
 
     if (session.realLoginIp && currentIp !== session.realLoginIp && !session.otpVerified) {
       session.simulatedIpMismatch = true;
@@ -1457,6 +1464,18 @@ async function startServer() {
 
     const user = users.find(u => u.id === session.userId);
     const evaluation = await trustEngine.evaluateSessionTrust(session, "Real-time Telemetry Polling", user, "/api/auth/current-session");
+
+    // Automatically trigger Step-Up OTP if trust dropped to or below role threshold
+    const roleThreshold = getRoleOtpThreshold(session.role);
+    if (session.currentTrustScore <= roleThreshold && !session.otpVerified) {
+      const activeOtp = sessionOtpCodes.get(session.id);
+      if (!activeOtp || Date.now() >= activeOtp.expiresAt) {
+        void issueOtpForSession(
+          session,
+          `Dynamic Zero Trust Telemetry: Score (${session.currentTrustScore}) dropped below threshold (${roleThreshold})`
+        );
+      }
+    }
     
     // Enrich with latest hybrid trust metrics
     const hybridData = evaluation.hybridResult;
@@ -1567,15 +1586,22 @@ async function startServer() {
     });
   });
 
-  app.get("/api/security/otp-status/:sessionId", (req, res) => {
+  app.get("/api/security/otp-status/:sessionId", async (req, res) => {
     const session = getSessionById(req.params.sessionId);
     if (!session) {
       return res.status(404).json({ error: "Session not found" });
     }
 
     const roleThreshold = getRoleOtpThreshold(session.role);
-    const activeOtp = sessionOtpCodes.get(session.id);
-    const isExpired = activeOtp ? Date.now() >= activeOtp.expiresAt : true;
+    let activeOtp = sessionOtpCodes.get(session.id);
+    let isExpired = activeOtp ? Date.now() >= activeOtp.expiresAt : true;
+
+    // Automatically generate and dispatch OTP if trust score has crossed below role threshold
+    if (session.currentTrustScore <= roleThreshold && !session.otpVerified && (!activeOtp || isExpired)) {
+      await issueOtpForSession(session, `Dynamic Zero Trust Step-Up (Score ${session.currentTrustScore} <= ${roleThreshold})`);
+      activeOtp = sessionOtpCodes.get(session.id);
+      isExpired = false;
+    }
 
     const user = users.find(u => u.id === session.userId);
     const recipientEmail = resolveActualRecipient(session.userEmail || user?.email);
@@ -1584,7 +1610,7 @@ async function startServer() {
       role: session.role,
       roleThreshold,
       currentTrustScore: session.currentTrustScore,
-      otpRequired: session.currentTrustScore < roleThreshold && !session.otpVerified,
+      otpRequired: session.currentTrustScore <= roleThreshold && !session.otpVerified,
       otpVerified: session.otpVerified,
       hasActiveOtp: !isExpired,
       recipientEmail: activeOtp?.userEmail || recipientEmail,
@@ -1595,9 +1621,10 @@ async function startServer() {
   });
 
   app.post("/api/security/request-otp", async (req, res) => {
-    const session = getSessionById(req.body.sessionId);
+    const rawSessionId = req.body?.sessionId || (req.headers.authorization as string) || (req.headers["x-session-id"] as string) || (req.query?.sessionId as string);
+    const session = getSessionById(rawSessionId);
     if (!session) {
-      return res.status(404).json({ error: "Session not found" });
+      return res.status(404).json({ error: "Session not found", message: "Invalid or missing session identifier" });
     }
 
     const triggerSource = req.body.reason || "Manual Step-Up OTP Verification Request";
@@ -2043,6 +2070,18 @@ async function startServer() {
 
     const evaluation = await trustEngine.evaluateSessionTrust(session, evalEventDesc, user, req.path);
     const hr = evaluation.hybridResult;
+
+    // Automatically trigger Step-Up OTP if trust score dropped to or below role threshold
+    const roleThreshold = getRoleOtpThreshold(session.role);
+    if (session.currentTrustScore <= roleThreshold && !session.otpVerified) {
+      const activeOtp = sessionOtpCodes.get(session.id);
+      if (!activeOtp || Date.now() >= activeOtp.expiresAt) {
+        void issueOtpForSession(
+          session,
+          `Document Access Step-Up: Score (${session.currentTrustScore}) dropped below role threshold (${roleThreshold})`
+        );
+      }
+    }
 
     // 6. RBAC & Separation of Duties Policy Enforcement
     // 6a. System Administrator Separation of Duties

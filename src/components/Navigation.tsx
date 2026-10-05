@@ -46,6 +46,22 @@ export default function Navigation({
               </span>
             </div>
 
+            {/* Real-time IP & Network Route Indicator */}
+            <div className="hidden md:flex flex-col items-end px-3 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-mono">
+              <div className="flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${session.simulatedIpMismatch ? "bg-rose-500 animate-ping" : "bg-emerald-500"}`}></span>
+                <span className="text-slate-500 font-bold font-sans">IP:</span>
+                <span className="font-bold text-slate-800">{session.currentRequestIp || session.ipAddress}</span>
+              </div>
+              <div className="text-[9px] text-slate-400 font-sans">
+                {session.simulatedIpMismatch ? (
+                  <span className="text-rose-600 font-bold">Route Shift (-15 pts)</span>
+                ) : (
+                  <span className="text-emerald-700 font-semibold">Route Verified</span>
+                )}
+              </div>
+            </div>
+
             <div className="relative">
               <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 py-1.5 px-3.5 rounded-lg text-xs font-bold text-slate-700">
                 <UserCheck className="w-4 h-4 text-indigo-600" />

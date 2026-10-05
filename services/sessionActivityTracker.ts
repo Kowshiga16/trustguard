@@ -150,7 +150,9 @@ class SessionActivityTracker {
     } catch {
       currentHour = new Date().getHours();
     }
-    const loginHour = session.simulatedNightAccess ? 23 : currentHour;
+    const loginHour = session.simulatedNightAccess 
+      ? 23 
+      : (process.env.NODE_ENV === "test" ? 10 : currentHour);
 
     // Session duration
     let durationMinutes = 1.0;

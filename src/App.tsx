@@ -393,12 +393,18 @@ export default function App() {
 
   // Action: OTP Step Up Verification
   async function handleRequestOtp(): Promise<void> {
-    if (!session) return;
+    if (!session?.id) return;
     try {
       await safeFetchJson("/api/security/request-otp", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: session.id })
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": session.id
+        },
+        body: JSON.stringify({ 
+          sessionId: session.id,
+          reason: "Zero Trust Step-Up Identity Challenge (Trust score crossed below threshold)"
+        })
       });
     } catch (err) {
       console.warn("Request OTP error:", err);

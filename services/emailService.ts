@@ -691,10 +691,66 @@ officers will never solicit your one-time password.
       };
     }
 
-    // 3. Send real email via SMTP with automatic Port 587 fallback
+    // 3. Send real email via HTTPS REST API (Brevo/Resend/Webhook) or NodeMailer SMTP
     const textContent = this.generateOtpPlainTextBody(otpData);
     const htmlContent = this.generateOtpHtmlBody(otpData);
 
+    // Option A: Brevo HTTPS REST API (Bypasses Render free tier port 465/587 blocks)
+    if (process.env.BREVO_API_KEY) {
+      try {
+        const brevoRes = await fetch("https://api.brevo.com/v3/smtp/email", {
+          method: "POST",
+          headers: {
+            "accept": "application/json",
+            "api-key": process.env.BREVO_API_KEY,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            sender: { name: "TrustGuard Security Engine", email: trustConfig.smtp.user || "svkowshiga@gmail.com" },
+            to: [{ email: recipient }],
+            subject,
+            htmlContent,
+            textContent
+          })
+        });
+        if (brevoRes.ok) {
+          const resData = await brevoRes.json();
+          console.log(`[EmailService] Step-Up OTP email dispatched via Brevo HTTPS API to ${recipient}. MessageId: ${resData.messageId}`);
+          return { success: true, simulated: false, otpCode: otpData.otpCode, messageId: resData.messageId };
+        }
+      } catch (brevoErr) {
+        console.warn("[EmailService] Brevo HTTPS dispatch failed, trying primary transporter:", brevoErr);
+      }
+    }
+
+    // Option B: Resend HTTPS REST API (Port 443)
+    if (process.env.RESEND_API_KEY) {
+      try {
+        const resendRes = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${process.env.RESEND_API_KEY}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            from: "TrustGuard Security <onboarding@resend.dev>",
+            to: recipient,
+            subject,
+            html: htmlContent,
+            text: textContent
+          })
+        });
+        if (resendRes.ok) {
+          const resData = await resendRes.json();
+          console.log(`[EmailService] Step-Up OTP email dispatched via Resend HTTPS API to ${recipient}. Id: ${resData.id}`);
+          return { success: true, simulated: false, otpCode: otpData.otpCode, messageId: resData.id };
+        }
+      } catch (resendErr) {
+        console.warn("[EmailService] Resend HTTPS dispatch failed, trying primary transporter:", resendErr);
+      }
+    }
+
+    // Option C: Standard NodeMailer SMTP (Port 465 with 587 fallback)
     try {
       const info = await this.transporter.sendMail({
         from: getSenderAddress(),
@@ -735,9 +791,9 @@ officers will never solicit your one-time password.
           tls: {
             rejectUnauthorized: false
           },
-          connectionTimeout: 8000,
-          greetingTimeout: 8000,
-          socketTimeout: 10000,
+          connectionTimeout: 4000,
+          greetingTimeout: 4000,
+          socketTimeout: 6000,
         });
 
         const fallbackInfo = await fallbackTransporter.sendMail({
