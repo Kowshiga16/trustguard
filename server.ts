@@ -1896,6 +1896,88 @@ async function startServer() {
     });
   });
 
+  app.get("/api/security/otp-diagnostic", async (req, res) => {
+    const brevoApiKey = process.env.BREVO_API_KEY?.trim();
+    const demoRecipient = resolveActualRecipient();
+    const isProduction = process.env.NODE_ENV === "production";
+
+    let brevoStatus = "NOT_CONFIGURED";
+    let brevoAccountEmail = "";
+    let brevoError = "";
+
+    if (brevoApiKey) {
+      try {
+        const brevoTest = await fetch("https://api.brevo.com/v3/account", {
+          headers: { "api-key": brevoApiKey, "accept": "application/json" }
+        });
+        if (brevoTest.ok) {
+          const accData = (await brevoTest.json()) as any;
+          brevoStatus = "CONNECTED_ACTIVE";
+          brevoAccountEmail = accData.email || "verified";
+        } else {
+          brevoStatus = `ERROR_HTTP_${brevoTest.status}`;
+          brevoError = await brevoTest.text();
+        }
+      } catch (err: any) {
+        brevoStatus = "NETWORK_ERROR";
+        brevoError = err?.message || String(err);
+      }
+    }
+
+    const smtpConfigured = emailService.isConfigured;
+
+    res.json({
+      environment: process.env.NODE_ENV || "development",
+      emailDelivery: {
+        provider: brevoApiKey ? "Brevo HTTPS API" : (smtpConfigured ? "NodeMailer SMTP" : (isProduction ? "NONE_CONFIGURED" : "DEV_MOCK")),
+        brevoConfigured: !!brevoApiKey,
+        brevoStatus,
+        brevoAccountEmail: brevoAccountEmail ? maskEmail(brevoAccountEmail) : undefined,
+        brevoError: brevoError ? brevoError.slice(0, 200) : undefined,
+        targetRecipient: maskEmail(demoRecipient),
+        smtpConfigured
+      },
+      zeroTrustState: {
+        activeSessionsCount: sessions.length,
+        activeOtpsCount: sessionOtpCodes.size,
+        roleThresholds: {
+          tahsildar: 60,
+          deputyTahsildar: 60,
+          revenueInspector: 60,
+          vao: 60,
+          dataEntryOperator: 60,
+          citizen: 50
+        }
+      },
+      diagnosticAdvice: !brevoApiKey && isProduction
+        ? "BREVO_API_KEY is not set in Render Environment variables. Add BREVO_API_KEY in Render Dashboard -> Environment."
+        : (!demoRecipient ? "DEMO_OTP_EMAIL is not set. Set DEMO_OTP_EMAIL=kowshiga931@gmail.com." : "Email system is ready. Click 'Verify via OTP' in the top navbar or reduce Trust Score below 60.")
+    });
+  });
+
+  app.post("/api/security/test-otp-direct", async (req, res) => {
+    const targetEmail = req.body?.email || resolveActualRecipient();
+    const result = await emailService.sendOtpEmail({
+      userName: req.body?.userName || "Test Revenue Officer",
+      userEmail: targetEmail,
+      userRole: "Tahsildar",
+      otpCode: generateOtp(),
+      currentTrustScore: 50,
+      roleThreshold: 60,
+      expiresInMinutes: 10,
+      triggerContext: "Manual Diagnostic Test Trigger"
+    });
+
+    res.json({
+      success: result.success,
+      emailStatus: result.simulated ? "SIMULATED_LOGGED" : (result.success ? "SENT" : "FAILED"),
+      targetRecipient: maskEmail(targetEmail),
+      simulated: result.simulated,
+      error: result.error,
+      messageId: result.messageId
+    });
+  });
+
   // In-memory Document Rate Limiting (10 requests per 10 seconds sliding window)
   const docAccessRateMap = new Map<string, number[]>();
   function checkDocAccessRateLimit(sessionId: string, maxPerWindow = 10, windowMs = 10000): boolean {
