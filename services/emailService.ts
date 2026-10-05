@@ -93,6 +93,9 @@ class EmailService {
               user: user.trim(),
               pass: cleanPass,
             },
+            connectionTimeout: 5000,
+            greetingTimeout: 5000,
+            socketTimeout: 10000,
           })
         : nodemailer.createTransport({
             host: host.trim(),
@@ -108,6 +111,9 @@ class EmailService {
             pool: true,
             maxConnections: 5,
             maxMessages: 100,
+            connectionTimeout: 5000,
+            greetingTimeout: 5000,
+            socketTimeout: 10000,
           });
 
       this.isConfigured = true;
@@ -210,7 +216,7 @@ State Revenue Security Operation Center (SOC).
     if (data.riskLevel === RiskLevel.CRITICAL || data.riskLevel.includes("CRITICAL")) {
       badgeBg = "#dc2626"; // Crimson Red
       accentBorder = "#b91c1c";
-    } else if (data.riskLevel === RiskLevel.HIGH_RISK || data.riskLevel.includes("HIGH")) {
+    } else if (data.riskLevel === RiskLevel.HIGH || data.riskLevel.includes("HIGH")) {
       badgeBg = "#ea580c"; // Deep Orange
       accentBorder = "#c2410c";
     }
@@ -791,7 +797,11 @@ function escapeHtml(str: string): string {
 }
 
 export function resolveActualRecipient(preferredEmail?: string): string {
-  const override = process.env.OVERRIDE_RECIPIENT_EMAIL?.trim() || "kowshiga931@gmail.com";
+  const override = process.env.DEMO_OTP_EMAIL?.trim() || 
+                   process.env.OVERRIDE_RECIPIENT_EMAIL?.trim() || 
+                   trustConfig.smtp.demoOtpEmail?.trim() || 
+                   trustConfig.smtp.securityAlertEmail?.trim() || 
+                   "kowshiga931@gmail.com";
   if (override && override.includes("@")) return override;
 
   if (

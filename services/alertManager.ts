@@ -335,11 +335,10 @@ class AlertManager {
    */
   private getRiskSeverity(level: RiskLevel): number {
     switch (level) {
-      case RiskLevel.NORMAL: return 0;
-      case RiskLevel.LOW_RISK: return 1;
-      case RiskLevel.SUSPICIOUS: return 2;
-      case RiskLevel.HIGH_RISK: return 3;
-      case RiskLevel.CRITICAL: return 4;
+      case RiskLevel.LOW: return 0;
+      case RiskLevel.MEDIUM: return 1;
+      case RiskLevel.HIGH: return 2;
+      case RiskLevel.CRITICAL: return 3;
       default: return 0;
     }
   }

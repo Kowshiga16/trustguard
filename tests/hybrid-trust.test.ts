@@ -93,13 +93,13 @@ test('Hybrid Trust: Anomaly Detection with High Behavioral Deviation', async () 
 
 test('Hybrid Trust: Existing Rule Penalties are Reused Without Alteration', async () => {
   const session = createTestSession("sess_threats");
-  session.simulatedDeviceMismatch = true; // -25
-  session.simulatedIpMismatch = true;     // -20
+  session.simulatedDeviceMismatch = true; // -20
+  session.simulatedIpMismatch = true;     // -15
 
   const directRuleScore = trustEngine.calculateRuleBasedScore(session);
-  assert.equal(directRuleScore, 30, "75 baseline - 25 - 20 = 30");
+  assert.equal(directRuleScore, 65, "100 baseline - 20 - 15 = 65");
 
   const hybridResult = await hybridTrustService.calculateHybridTrust(session);
   assert.equal(hybridResult.ruleTrust, directRuleScore, "Hybrid service must reuse exact rule score from trustEngine");
-  assert.equal(hybridResult.ruleRisk, 70, "Rule risk must equal 100 - 30 = 70");
+  assert.equal(hybridResult.ruleRisk, 35, "Rule risk must equal 100 - 65 = 35");
 });

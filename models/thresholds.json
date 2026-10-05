@@ -1,0 +1,54 @@
+{
+  "features": [
+    "login_hour",
+    "records_viewed",
+    "downloads_count",
+    "requests_per_minute",
+    "failed_operations",
+    "session_duration_minutes"
+  ],
+  "n_estimators": 100,
+  "contamination": 0.05,
+  "random_state": 42,
+  "s5": -9.812029660993815e-18,
+  "s95": 0.16041961173692823,
+  "training_samples": 100,
+  "feature_stats": {
+    "login_hour": {
+      "min": 7.0,
+      "max": 19.0,
+      "mean": 12.29,
+      "std": 3.134348642723303
+    },
+    "records_viewed": {
+      "min": 1.0,
+      "max": 20.0,
+      "mean": 8.05,
+      "std": 4.922377269145263
+    },
+    "downloads_count": {
+      "min": 0.0,
+      "max": 5.0,
+      "mean": 1.43,
+      "std": 1.2247861078984406
+    },
+    "requests_per_minute": {
+      "min": 1.8,
+      "max": 14.2,
+      "mean": 6.7200000000000015,
+      "std": 2.924331918869192
+    },
+    "failed_operations": {
+      "min": 0.0,
+      "max": 3.0,
+      "mean": 0.42,
+      "std": 0.669388383586695
+    },
+    "session_duration_minutes": {
+      "min": 5.0,
+      "max": 118.0,
+      "mean": 41.02,
+      "std": 27.721551984772507
+    }
+  }
+}

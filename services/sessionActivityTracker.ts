@@ -2,21 +2,18 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * TrustGuard Additive Session Activity Monitor
- * Tracks real-time user session metrics for Isolation Forest ML behavioral analysis:
- * 1. login_hour (time patterns)
- * 2. records_viewed (access frequency)
- * 3. downloads_count (document access rate)
- * 4. requests_per_minute (rolling velocity)
- * 5. failed_operations (failed access attempts)
- * 6. session_duration_minutes (historical duration)
- * 7. ip_mismatch (observed IP change)
- * 8. device_mismatch (observed device shift)
- * 9. distinct_documents_count (distinct documents inspected)
- * 10. document_sensitivity (highest classification inspected: 0=Public, 1=Restricted, 2=Confidential)
+ * TrustGuard Session Activity & Behavioral Monitor
+ * Real-time behavioral metric tracking for Scikit-Learn Isolation Forest analysis:
+ * 1. login_hour (working hour distribution: 7 to 19 baseline)
+ * 2. records_viewed (cumulative land documents viewed in session)
+ * 3. downloads_count (cumulative documents exported/downloaded)
+ * 4. requests_per_minute (rolling 60-second request velocity)
+ * 5. failed_operations (unauthorized actions / permission denials)
+ * 6. session_duration_minutes (session elapsed duration)
  */
 
 import { ActiveSession } from "../src/types";
+import { getRoleDocumentPolicy } from "./trustConfig";
 
 export interface SessionBehavioralFeatures {
   login_hour: number;
@@ -25,10 +22,8 @@ export interface SessionBehavioralFeatures {
   requests_per_minute: number;
   failed_operations: number;
   session_duration_minutes: number;
-  ip_mismatch: number;
-  device_mismatch: number;
-  distinct_documents_count?: number;
-  document_sensitivity?: number;
+  ip_mismatch?: number;
+  device_mismatch?: number;
 }
 
 interface InternalSessionState {
@@ -36,8 +31,8 @@ interface InternalSessionState {
   downloadsCount: number;
   requestTimestamps: number[];
   failedOperations: number;
+  rateLimitExceeded: boolean;
   distinctDocumentIds: Set<string>;
-  maxSensitivityLevel: number; // 0=Public, 1=Restricted, 2=Confidential
 }
 
 class SessionActivityTracker {
@@ -51,59 +46,101 @@ class SessionActivityTracker {
         downloadsCount: 0,
         requestTimestamps: [],
         failedOperations: 0,
-        distinctDocumentIds: new Set<string>(),
-        maxSensitivityLevel: 0
+        rateLimitExceeded: false,
+        distinctDocumentIds: new Set<string>()
       };
       this.sessions.set(sessionId, state);
     }
     return state;
   }
 
+  /**
+   * Tracks an incoming API request within rolling 60-second window.
+   */
   public recordRequest(sessionId: string): void {
     const state = this.getOrCreate(sessionId);
     const now = Date.now();
     state.requestTimestamps.push(now);
-    // Keep only timestamps from the last 60 seconds
     state.requestTimestamps = state.requestTimestamps.filter(t => now - t <= 60000);
   }
 
-  public recordRecordView(sessionId: string, count: number = 1): void {
+  /**
+   * Tracks document viewing activity (NOT a download).
+   */
+  public recordRecordView(sessionId: string, count: number = 1, docId?: string): void {
     const state = this.getOrCreate(sessionId);
     state.recordsViewed += count;
-  }
-
-  public recordDownload(sessionId: string, docId?: string, classification?: string): void {
-    const state = this.getOrCreate(sessionId);
-    state.downloadsCount += 1;
     if (docId) {
       state.distinctDocumentIds.add(docId);
     }
-    if (classification) {
-      const level = classification.toUpperCase() === "CONFIDENTIAL" ? 2 : (classification.toUpperCase() === "RESTRICTED" ? 1 : 0);
-      if (level > state.maxSensitivityLevel) {
-        state.maxSensitivityLevel = level;
-      }
-    }
   }
 
+  /**
+   * Tracks an explicit document file download / export action.
+   */
+  public recordDownload(sessionId: string, count: number = 1): void {
+    const state = this.getOrCreate(sessionId);
+    state.downloadsCount += count;
+  }
+
+  /**
+   * Tracks an authorization failure, invalid attempt, or access denial.
+   */
   public recordFailedOperation(sessionId: string): void {
     const state = this.getOrCreate(sessionId);
     state.failedOperations += 1;
   }
 
+  /**
+   * Evaluates role-based document access velocity against configurable limits.
+   * If rate exceeds the role limit, flags rateLimitExceeded as a risk signal.
+   */
+  public checkRoleDocumentRate(sessionId: string, role: string): { 
+    withinLimit: boolean; 
+    currentRate: number; 
+    maxAllowed: number 
+  } {
+    const state = this.getOrCreate(sessionId);
+    const now = Date.now();
+    state.requestTimestamps = state.requestTimestamps.filter(t => now - t <= 60000);
+    const currentRate = state.requestTimestamps.length;
+    const policy = getRoleDocumentPolicy(role);
+    const withinLimit = currentRate <= policy.maxViewsPerMinute;
+
+    if (!withinLimit) {
+      state.rateLimitExceeded = true;
+    }
+
+    return {
+      withinLimit,
+      currentRate,
+      maxAllowed: policy.maxViewsPerMinute
+    };
+  }
+
+  public isRateLimitExceeded(sessionId: string): boolean {
+    const state = this.sessions.get(sessionId);
+    return state ? state.rateLimitExceeded : false;
+  }
+
+  public clearRateLimitExceeded(sessionId: string): void {
+    const state = this.sessions.get(sessionId);
+    if (state) state.rateLimitExceeded = false;
+  }
+
+  /**
+   * Extracts the exact 6-dimensional feature vector matching the dataset schema.
+   */
   public extractFeatures(session: ActiveSession): SessionBehavioralFeatures {
     const state = this.getOrCreate(session.id);
     const now = Date.now();
 
-    // Clean up timestamps older than 60 seconds
     state.requestTimestamps = state.requestTimestamps.filter(t => now - t <= 60000);
     const requestsPerMinute = state.requestTimestamps.length;
 
-    // Use hour 23 if night/off-hours access is simulated, otherwise real hour if within working hours or fallback to 12 PM
+    // Login hour: current local hour (0-23), or 23 if simulated night access
     const currentHour = new Date().getHours();
-    const isWorkingHours = currentHour >= 10 && currentHour < 16;
-    const defaultWorkingHour = isWorkingHours ? currentHour : (process.env.ENABLE_ORGANIC_OFFHOURS === "true" ? currentHour : 12);
-    const loginHour = session.simulatedNightAccess ? 23 : defaultWorkingHour;
+    const loginHour = session.simulatedNightAccess ? 23 : currentHour;
 
     // Session duration
     let durationMinutes = 1.0;
@@ -111,7 +148,7 @@ class SessionActivityTracker {
       if (session.loginTime) {
         const loginMs = new Date(session.loginTime).getTime();
         if (!isNaN(loginMs)) {
-          durationMinutes = Math.max(0.1, Math.round(((now - loginMs) / 60000) * 10) / 10);
+          durationMinutes = Math.max(0.5, Math.round(((now - loginMs) / 60000) * 10) / 10);
         }
       }
     } catch {
@@ -128,21 +165,21 @@ class SessionActivityTracker {
       failed_operations: failedOps,
       session_duration_minutes: durationMinutes,
       ip_mismatch: session.simulatedIpMismatch ? 1 : 0,
-      device_mismatch: session.simulatedDeviceMismatch ? 1 : 0,
-      distinct_documents_count: state.distinctDocumentIds.size,
-      document_sensitivity: state.maxSensitivityLevel
+      device_mismatch: session.simulatedDeviceMismatch ? 1 : 0
     };
   }
 
   public getSessionMetrics(sessionId: string) {
     const state = this.getOrCreate(sessionId);
+    const now = Date.now();
+    state.requestTimestamps = state.requestTimestamps.filter(t => now - t <= 60000);
     return {
       recordsViewed: state.recordsViewed,
       downloadsCount: state.downloadsCount,
       requestsPerMinute: state.requestTimestamps.length,
       failedOperations: state.failedOperations,
-      distinctDocumentsCount: state.distinctDocumentIds.size,
-      maxSensitivityLevel: state.maxSensitivityLevel
+      rateLimitExceeded: state.rateLimitExceeded,
+      distinctDocumentsCount: state.distinctDocumentIds.size
     };
   }
 

@@ -1,18 +1,34 @@
 """
 TrustGuard - Dynamic Zero Trust Access Control for Land Records Management
 ML Service: Scikit-learn Isolation Forest via FastAPI
+Trained on sample activity dataset across 6 core behavioral indicators:
+  1. login_hour (Normal range: 7 to 19)
+  2. records_viewed (Normal range: 1 to 20)
+  3. downloads_count (Normal range: 0 to 5)
+  4. requests_per_minute (Normal range: 1.8 to 14.2)
+  5. failed_operations (Normal range: 0 to 3)
+  6. session_duration_minutes (Normal range: 5 to 118)
 """
 
+import os
+import json
+from typing import List, Optional
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sklearn.ensemble import IsolationForest
+import joblib
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODELS_DIR = os.path.join(BASE_DIR, "models")
+MODEL_PATH = os.path.join(MODELS_DIR, "isolation_forest.joblib")
+THRESHOLDS_PATH = os.path.join(MODELS_DIR, "thresholds.json")
 
 app = FastAPI(
     title="TrustGuard ML Anomaly Detector",
     description="Isolation Forest behavioral anomaly engine for Zero Trust continuous session evaluation",
-    version="1.0.0"
+    version="2.0.0"
 )
 
 app.add_middleware(
@@ -23,65 +39,60 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-class SessionFeatures(BaseModel):
-    ipMismatch: int = Field(0, description="1 if IP differs from baseline, else 0")
-    deviceMismatch: int = Field(0, description="1 if device fingerprint mismatch, else 0")
-    nightAccess: int = Field(0, description="1 if accessed outside normal office hours, else 0")
-    outsideJurisdiction: int = Field(0, description="1 if accessing outside assigned taluk/village, else 0")
-    spamTriggered: int = Field(0, description="1 if rapid API spikes detected, else 0")
-    idleTriggered: int = Field(0, description="1 if burst action after long idle, else 0")
-    failedActionCount: int = Field(0, ge=0, description="Count of recent failed actions/authorizations")
-    requestHour: int = Field(12, ge=0, le=23, description="Hour of request (0-23)")
-    trustScoreBaseline: float = Field(75.0, description="Current rule-based trust score")
-
+class BehavioralFeatures(BaseModel):
+    login_hour: int = Field(..., ge=0, le=23, description="Hour of login/request (0-23)")
+    records_viewed: int = Field(0, ge=0, description="Cumulative count of land records inspected in session")
+    downloads_count: int = Field(0, ge=0, description="Count of document downloads initiated in session")
+    requests_per_minute: float = Field(0.0, ge=0.0, description="Current rolling requests per minute")
+    failed_operations: int = Field(0, ge=0, description="Count of failed actions or unauthorized attempts")
+    session_duration_minutes: float = Field(0.0, ge=0.0, description="Elapsed session duration in minutes")
+    ip_mismatch: Optional[int] = Field(0, ge=0, le=1)
+    device_mismatch: Optional[int] = Field(0, ge=0, le=1)
 
 class PredictionResponse(BaseModel):
-    anomalyScore: float
-    isAnomaly: bool
-    riskPenalty: int
-    source: str
+    isolation_forest_score: float
+    is_anomaly: bool
+    normalized_anomaly_score: float
+    ml_risk: float
+    anomaly_reasons: List[str]
     details: str
 
+model = None
+s5 = None
+s95 = None
 
-# Initialize and train Isolation Forest on synthetic baseline of normal and anomalous activity
-np.random.seed(42)
+def load_or_train_model():
+    global model, s5, s95
+    if os.path.exists(MODEL_PATH) and os.path.exists(THRESHOLDS_PATH):
+        try:
+            model = joblib.load(MODEL_PATH)
+            with open(THRESHOLDS_PATH, "r") as f:
+                data = json.load(f)
+                s5 = float(data["s5"])
+                s95 = float(data["s95"])
+            return
+        except Exception as e:
+            print(f"[ML Service] Loading error: {e}. Retraining...")
 
-# Normal behaviors: mostly zeros, daytime hours (9-18), 0-1 failed actions, high baseline score
-normal_data = np.column_stack([
-    np.random.choice([0, 1], size=1000, p=[0.96, 0.04]),  # ipMismatch
-    np.random.choice([0, 1], size=1000, p=[0.97, 0.03]),  # deviceMismatch
-    np.random.choice([0, 1], size=1000, p=[0.95, 0.05]),  # nightAccess
-    np.random.choice([0, 1], size=1000, p=[0.98, 0.02]),  # outsideJurisdiction
-    np.random.choice([0, 1], size=1000, p=[0.98, 0.02]),  # spamTriggered
-    np.random.choice([0, 1], size=1000, p=[0.96, 0.04]),  # idleTriggered
-    np.random.poisson(0.2, size=1000),                    # failedActionCount
-    np.random.normal(13, 3, size=1000).clip(8, 18),       # requestHour
-    np.random.normal(85, 8, size=1000).clip(60, 100),     # trustScoreBaseline
-])
+    csv_path = os.path.join(BASE_DIR, "data", "activity_dataset.csv")
+    if os.path.exists(csv_path):
+        import pandas as pd
+        df = pd.read_csv(csv_path)
+        feature_names = ["login_hour", "records_viewed", "downloads_count", "requests_per_minute", "failed_operations", "session_duration_minutes"]
+        X = df[feature_names].values
+        model = IsolationForest(n_estimators=100, contamination=0.05, random_state=42)
+        model.fit(X)
+        scores = model.decision_function(X)
+        s5 = float(np.percentile(scores, 5))
+        s95 = float(np.percentile(scores, 95))
+        os.makedirs(MODELS_DIR, exist_ok=True)
+        joblib.dump(model, MODEL_PATH)
+        with open(THRESHOLDS_PATH, "w") as f:
+            json.dump({"features": feature_names, "s5": s5, "s95": s95}, f, indent=2)
 
-# Synthetic anomalous behavior samples
-threat_data = np.column_stack([
-    np.random.choice([0, 1], size=100, p=[0.2, 0.8]),     # ipMismatch
-    np.random.choice([0, 1], size=100, p=[0.1, 0.9]),     # deviceMismatch
-    np.random.choice([0, 1], size=100, p=[0.3, 0.7]),     # nightAccess
-    np.random.choice([0, 1], size=100, p=[0.2, 0.8]),     # outsideJurisdiction
-    np.random.choice([0, 1], size=100, p=[0.4, 0.6]),     # spamTriggered
-    np.random.choice([0, 1], size=100, p=[0.5, 0.5]),     # idleTriggered
-    np.random.poisson(3.5, size=100),                     # failedActionCount
-    np.random.choice([1, 2, 3, 22, 23], size=100),       # requestHour (night)
-    np.random.normal(35, 12, size=100).clip(0, 60),       # trustScoreBaseline
-])
-
-training_matrix = np.vstack([normal_data, threat_data])
-
-model = IsolationForest(
-    n_estimators=100,
-    contamination=0.1,
-    random_state=42
-)
-model.fit(training_matrix)
-
+@app.on_event("startup")
+def startup_event():
+    load_or_train_model()
 
 @app.get("/health")
 def health_check():
@@ -92,62 +103,64 @@ def health_check():
         "n_estimators": 100
     }
 
-
 @app.post("/predict", response_model=PredictionResponse)
-def predict_anomaly(features: SessionFeatures):
+def predict_anomaly(features: BehavioralFeatures):
+    global model, s5, s95
+    if model is None or s5 is None or s95 is None:
+        load_or_train_model()
+        if model is None:
+            raise HTTPException(status_code=503, detail="Model unavailable")
+
     try:
         sample = np.array([[
-            features.ipMismatch,
-            features.deviceMismatch,
-            features.nightAccess,
-            features.outsideJurisdiction,
-            features.spamTriggered,
-            features.idleTriggered,
-            features.failedActionCount,
-            features.requestHour,
-            features.trustScoreBaseline
-        ]])
+            features.login_hour,
+            features.records_viewed,
+            features.downloads_count,
+            features.requests_per_minute,
+            features.failed_operations,
+            features.session_duration_minutes
+        ]], dtype=float)
 
-        # decision_function yields negative values for anomalies, positive for inliers
-        raw_score = model.decision_function(sample)[0]
-        # prediction: 1 for inlier, -1 for anomaly
-        prediction = model.predict(sample)[0]
+        ifs = float(model.decision_function(sample)[0])
+        prediction = int(model.predict(sample)[0])
 
-        # Normalize score into [0.0, 1.0] where 1.0 is extremely anomalous
-        # decision_function typically ranges from -0.35 to +0.25
-        normalized_score = float(np.clip(1.0 - (raw_score + 0.35) / 0.60, 0.0, 1.0))
-        is_anomaly = bool(prediction == -1 or normalized_score >= 0.50)
+        if s95 != s5:
+            nas = float(np.clip((s95 - ifs) / (s95 - s5), 0.0, 1.0))
+        else:
+            nas = 0.0
 
-        # Calculate risk penalty points (0 - 25 points)
-        risk_penalty = int(round(normalized_score * 25)) if is_anomaly else 0
+        is_anomaly = bool(prediction == -1 or nas >= 0.50)
+        ml_risk = float(round(25.0 * nas, 2)) if is_anomaly else 0.0
 
         reasons = []
-        if features.deviceMismatch:
-            reasons.append("Unrecognized device fingerprint")
-        if features.ipMismatch:
-            reasons.append("Network IP route drift")
-        if features.outsideJurisdiction:
-            reasons.append("Cross-jurisdiction mutation access attempt")
-        if features.nightAccess:
-            reasons.append("Off-hours session access")
-        if features.spamTriggered:
-            reasons.append("Burst API request spike")
-        if features.failedActionCount > 1:
-            reasons.append(f"Repeated unauthorized attempts ({features.failedActionCount})")
+        if features.requests_per_minute > 14.2:
+            reasons.append(f"Excessive document access rate ({features.requests_per_minute:.1f} req/min vs max baseline 14.2)")
+        if features.records_viewed > 20:
+            reasons.append(f"Abnormal record inspection volume ({features.records_viewed} records vs baseline max 20)")
+        if features.downloads_count > 5:
+            reasons.append(f"Unusual document download activity ({features.downloads_count} downloads vs baseline max 5)")
+        if features.failed_operations > 3:
+            reasons.append(f"Repeated authorization failures ({features.failed_operations} failed attempts vs baseline max 3)")
+        if features.login_hour < 7 or features.login_hour > 19:
+            reasons.append(f"Off-hours access anomaly (hour {features.login_hour}:00 outside baseline 07:00-19:00)")
 
-        detail_text = "; ".join(reasons) if reasons else "Normal session profile"
+        if not reasons:
+            if is_anomaly:
+                reasons.append(f"Isolation Forest identified behavioral divergence (NAS: {nas:.2f})")
+            else:
+                reasons.append("Behavioral profile is within normal baseline parameters")
 
         return PredictionResponse(
-            anomalyScore=round(normalized_score, 3),
-            isAnomaly=is_anomaly,
-            riskPenalty=risk_penalty,
-            source="fastapi_isolation_forest",
-            details=detail_text
+            isolation_forest_score=round(ifs, 4),
+            is_anomaly=is_anomaly,
+            normalized_anomaly_score=round(nas, 4),
+            ml_risk=ml_risk,
+            anomaly_reasons=reasons,
+            details="; ".join(reasons)
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("ml_service:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("ml_service:app", host="127.0.0.1", port=8000, reload=False)

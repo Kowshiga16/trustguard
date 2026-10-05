@@ -197,7 +197,7 @@ export interface AuditLog {
   actionPerformed: string;
   resourceAccessed: string;
   trustScoreAtAction: number;
-  decision: "ALLOWED" | "DENIED" | "STEP-UP OTP" | "TERMINATED" | "LIMITED ACCESS";
+  decision: "ALLOWED" | "DENIED" | "STEP-UP OTP" | "TERMINATED" | "LIMITED ACCESS" | "RATE_LIMITED";
   timestamp: string;
   // Forensic audit trail fields
   previousTrustScore?: number;

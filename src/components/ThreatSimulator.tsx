@@ -42,7 +42,7 @@ export default function ThreatSimulator({
       id: "simulatedDeviceMismatch",
       name: "Device Fingerprint Mismatch",
       desc: "Hijacked login cookie transferred to another machine.",
-      penalty: -25,
+      penalty: -20,
       icon: Laptop,
       active: session.simulatedDeviceMismatch
     },
@@ -50,7 +50,7 @@ export default function ThreatSimulator({
       id: "simulatedIpMismatch",
       name: "Mid-Session IP Route Drift",
       desc: "User shifts networks mid-session or hops onto a proxy/VPN.",
-      penalty: -20,
+      penalty: -15,
       icon: Wifi,
       active: session.simulatedIpMismatch
     },

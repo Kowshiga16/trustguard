@@ -78,7 +78,8 @@ export default function RecordsPortal({
 
   if (!session) return null;
 
-  const isReadOnly = session.currentTrustScore < 80;
+  const isReadOnly = session.currentTrustScore < 60;
+  const isRestricted = session.currentTrustScore >= 60 && session.currentTrustScore < 80;
   const isDEO = session.role === RoleName.DataEntryOperator;
   const isCitizen = session.role === RoleName.Citizen;
   const isAdmin = session.role === RoleName.SystemAdministrator;
@@ -331,7 +332,16 @@ export default function RecordsPortal({
         <div className="mb-5 bg-amber-50/70 border border-amber-200/60 p-4 rounded-lg flex items-start gap-3">
           <ShieldAlert className="w-4.5 h-4.5 text-amber-600 shrink-0 mt-0.5" />
           <p className="text-xs text-amber-800 leading-relaxed font-medium">
-            <b>PEP Enforced Read-Only Mode:</b> Your current Trust Score is <b>{session.currentTrustScore}</b>. Because it is below 80, the Policy Enforcement Point (PEP) has locked out mutations, edits, and additions.
+            <b>PEP Enforced Read-Only Mode:</b> Your current Trust Score is <b>{session.currentTrustScore}/100</b> (High Risk). Land records are viewable in Read-Only mode. Mutations, additions, and approvals are locked. Complete Step-Up OTP to restore full access.
+          </p>
+        </div>
+      )}
+
+      {isRestricted && !isAdmin && (
+        <div className="mb-5 bg-blue-50/70 border border-blue-200/60 p-4 rounded-lg flex items-start gap-3">
+          <ShieldAlert className="w-4.5 h-4.5 text-blue-600 shrink-0 mt-0.5" />
+          <p className="text-xs text-blue-800 leading-relaxed font-medium">
+            <b>Restricted Access Mode:</b> Your current Trust Score is <b>{session.currentTrustScore}/100</b> (Medium Risk). Document viewing is permitted. Step-Up OTP authentication is required for sensitive mutations and approvals.
           </p>
         </div>
       )}
@@ -1111,8 +1121,7 @@ export default function RecordsPortal({
             {(docDenialDecision === "OTP_REQUIRED" ||
               docDenialDecision === "BLOCKED" ||
               docDenialReason.toLowerCase().includes("otp") ||
-              docDenialReason.toLowerCase().includes("step-up") ||
-              (session && session.currentTrustScore <= 70)) ? (
+              docDenialReason.toLowerCase().includes("step-up")) ? (
               <form onSubmit={handleModalVerifyOtp} className="space-y-4 text-left">
                 {/* Email dispatch alert */}
                 <div className="bg-indigo-50/80 border border-indigo-100 p-3 rounded-xl flex items-start gap-2.5 text-xs text-indigo-950">

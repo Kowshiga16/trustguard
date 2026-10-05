@@ -40,30 +40,30 @@ export default function TrustProgress({ session }: TrustProgressProps) {
   let Icon = HelpCircle;
   let accessDecision = "UNKNOWN";
 
-  if (score >= 76) {
-    bandName = "Full Access (Trusted)";
+  if (score >= 80) {
+    bandName = "Low Risk • Full Access";
     bandColor = "bg-emerald-950/30 text-emerald-300 border-emerald-900/40";
-    bandDesc = "Optimal security posture. All role-permitted write and approval actions are enabled.";
+    bandDesc = "Optimal zero trust posture. Normal access, viewing certified records, creating mutations, approvals enabled. OTP not required.";
     Icon = ShieldCheck;
-    accessDecision = "FULL_ACCESS";
-  } else if (score >= 61) {
-    bandName = "Read-Only Mode";
+    accessDecision = "FULL";
+  } else if (score >= 60) {
+    bandName = "Medium Risk • Restricted";
     bandColor = "bg-amber-950/30 text-amber-300 border-amber-900/40";
-    bandDesc = "Minor contextual drift. Record creation, edits, and mutation approvals are locked.";
+    bandDesc = "Moderate risk or contextual drift. Permitted records viewable. Step-Up OTP required for sensitive mutations and approvals.";
     Icon = Shield;
-    accessDecision = "READ_ONLY";
-  } else if (score >= 51) {
-    bandName = "Step-Up Verification Required";
-    bandColor = "bg-orange-950/30 text-orange-300 border-orange-900/40 animate-pulse";
-    bandDesc = "Elevated risk. Verification of identity via multi-factor OTP is required for sensitive operations.";
+    accessDecision = "RESTRICTED";
+  } else if (score >= 40) {
+    bandName = "High Risk • Read-Only";
+    bandColor = "bg-orange-950/30 text-orange-300 border-orange-900/40";
+    bandDesc = "Elevated risk detected. Permitted records viewable in Read-Only mode. Mutations and approvals blocked. Step-Up OTP required to restore privileges.";
     Icon = ShieldAlert;
-    accessDecision = "OTP_REQUIRED";
+    accessDecision = "READ-ONLY";
   } else {
-    bandName = "Session Blocked / Suspended";
+    bandName = "Critical Risk • Blocked";
     bandColor = "bg-rose-950/30 text-rose-300 border-rose-900/40";
-    bandDesc = "Critical security compromise. Active session terminated.";
+    bandDesc = "Severe anomaly or multiple security violations. Access blocked. Session challenged / terminated.";
     Icon = Lock;
-    accessDecision = "TERMINATE_SESSION";
+    accessDecision = "BLOCKED";
   }
 
   const radius = 45;
@@ -90,7 +90,7 @@ export default function TrustProgress({ session }: TrustProgressProps) {
                 strokeDasharray={circumference}
                 strokeDashoffset={offset}
                 strokeLinecap="round"
-                className={`transition-all duration-500 ${score >= 76 ? "stroke-emerald-500" : score >= 61 ? "stroke-amber-500" : score >= 51 ? "stroke-orange-500" : "stroke-rose-500"}`}
+                className={`transition-all duration-500 ${score >= 80 ? "stroke-emerald-500" : score >= 60 ? "stroke-amber-500" : score >= 40 ? "stroke-orange-500" : "stroke-rose-500"}`}
                 strokeWidth="6" fill="transparent"
               />
             </svg>
@@ -131,6 +131,23 @@ export default function TrustProgress({ session }: TrustProgressProps) {
               <div className="text-xl font-mono font-bold text-white">{hybridData ? Math.round(hybridData.mlRisk) : 0} <span className="text-xs text-slate-500 font-sans font-normal">pts</span></div>
            </div>
         </div>
+
+        {/* Explainable Factor Breakdown */}
+        {hybridData?.riskFactors && Object.keys(hybridData.riskFactors).length > 0 && (
+          <div className="bg-slate-850/80 rounded-lg p-2.5 border border-slate-800">
+            <h5 className="text-[9px] font-bold uppercase tracking-wider text-rose-400 mb-1.5 flex items-center gap-1">
+              <ShieldAlert className="w-3 h-3 text-rose-400" /> Explainable Risk Factors
+            </h5>
+            <div className="space-y-1">
+              {Object.entries(hybridData.riskFactors).map(([factor, pts]: [string, any]) => (
+                <div key={factor} className="flex justify-between items-center text-[10px] text-slate-300">
+                  <span className="truncate pr-2">{factor}</span>
+                  <span className="font-mono font-bold text-rose-400 shrink-0">-{pts} pts</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="border-t border-slate-800 pt-3 flex-1 mt-1">
           <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Current Behavioral Indicators</h4>

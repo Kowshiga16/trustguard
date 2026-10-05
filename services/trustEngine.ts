@@ -4,19 +4,23 @@
  * 
  * TrustGuard Dynamic Trust Engine & Policy Decision Point
  * Orchestrates:
- *  1. Rule-Based Contextual Trust Scoring
+ *  1. Rule-Based Contextual Trust Scoring (Device, IP, Jurisdiction, Rate Limit)
  *  2. Scikit-Learn Isolation Forest ML Anomaly Scoring
- *  3. Combined Final Trust Calculation
+ *  3. Explainable Combined Final Trust Calculation (Starts at 100)
  *  4. Continuous Evaluation & Alert Triggering
  *  5. Asynchronous NodeMailer Security Email Dispatch
  */
 
 import { ActiveSession, AuditLog, TrustLog, SecurityAlert, User } from "../src/types";
-import { trustConfig, RiskLevel, getRiskLevel, getPolicyDecisionForRisk } from "./trustConfig";
-import { mlService, MLPredictionResult } from "./mlService";
+import { trustConfig, RiskLevel, AccessMode, getRiskLevel, getAccessModeForScore, getPolicyDecisionForRisk } from "./trustConfig";
 import { alertManager, AlertEvaluationResult } from "./alertManager";
-
 import { hybridTrustService, HybridTrustScoreResult } from "./hybridTrustService";
+import { sessionActivityTracker } from "./sessionActivityTracker";
+
+export interface RuleDeductionResult {
+  totalDeductions: number;
+  factorBreakdown: Record<string, number>;
+}
 
 export interface TrustEngineEvaluation {
   previousScore: number;
@@ -24,6 +28,7 @@ export interface TrustEngineEvaluation {
   ruleBasedScore: number;
   hybridResult: HybridTrustScoreResult;
   riskLevel: RiskLevel;
+  accessMode: AccessMode;
   policyDecision: string;
   reasons: string[];
   alertTriggered: boolean;
@@ -35,68 +40,67 @@ export interface TrustEngineEvaluation {
 
 class TrustEngine {
   /**
-   * Calculates the rule-based trust score component from multi-signal context.
+   * Evaluates explainable rule-based deductions.
+   * Starts from a baseline of 100; deductions applied only upon threat evidence.
    */
-  public calculateRuleBasedScore(session: ActiveSession): number {
-    let score = 75; // Baseline trust
+  public evaluateRuleDeductions(session: ActiveSession): RuleDeductionResult {
+    let totalDeductions = 0;
+    const factorBreakdown: Record<string, number> = {};
 
-    // Organic 10 AM to 4 PM working hours check (active in production when ENABLE_ORGANIC_OFFHOURS=true)
-    if (process.env.NODE_ENV !== "test" && process.env.ENABLE_ORGANIC_OFFHOURS === "true") {
-      const currentHour = new Date().getHours();
-      if ((currentHour < 10 || currentHour >= 16) && !session.otpVerified) {
-        session.simulatedNightAccess = true;
-      }
-    }
+    const { deductions } = trustConfig;
 
     if (session.simulatedDeviceMismatch) {
-      score -= 25; // Critical device mismatch
+      totalDeductions += deductions.newDevice;
+      factorBreakdown["New Device / Fingerprint Mismatch"] = deductions.newDevice;
     }
+
     if (session.simulatedIpMismatch) {
-      score -= 20; // High risk IP change
+      totalDeductions += deductions.differentIp;
+      factorBreakdown["Different IP / Network Route Drift"] = deductions.differentIp;
     }
+
     if (session.simulatedNightAccess) {
-      score -= 10; // Off-hours penalty
+      totalDeductions += deductions.offHoursAccess;
+      factorBreakdown["Off-Hours Registry Access"] = deductions.offHoursAccess;
     }
+
     if (session.simulatedOutsideJurisdiction) {
-      score -= 20; // Accessing records outside jurisdiction
+      totalDeductions += deductions.outsideJurisdiction;
+      factorBreakdown["Cross-Jurisdiction Access Attempt"] = deductions.outsideJurisdiction;
     }
-    if (session.simulatedSpamTriggered) {
-      score -= 15; // Spam detection
+
+    const rateExceeded = session.simulatedSpamTriggered || sessionActivityTracker.isRateLimitExceeded(session.id);
+    if (rateExceeded) {
+      totalDeductions += deductions.rateLimitViolation;
+      factorBreakdown["Document Request Velocity Violation"] = deductions.rateLimitViolation;
     }
+
     if (session.simulatedIdleTriggered) {
-      score -= 10; // Idle burst threat
-    }
-    if (session.failedActionCount > 0) {
-      score -= (session.failedActionCount * 12); // Exponential failed actions penalty
+      totalDeductions += 10;
+      factorBreakdown["Post-Idle Burst Anomaly"] = 10;
     }
 
-    // Positive trust signals
-    if (session.otpVerified) {
-      score += 15;
-    }
-    if (!session.simulatedDeviceMismatch && !session.simulatedIpMismatch) {
-      score += 10; // Stable context bonus
+    if (session.failedActionCount && session.failedActionCount > 0) {
+      const failDeduction = session.failedActionCount * deductions.failedOperation;
+      totalDeductions += failDeduction;
+      factorBreakdown[`Unauthorized / Failed Attempts (${session.failedActionCount})`] = failDeduction;
     }
 
-    return Math.min(100, Math.max(0, score));
+    return { totalDeductions, factorBreakdown };
   }
 
   /**
-   * Combines rule-based score and ML Isolation Forest anomaly score into final trust score.
+   * Calculates the rule-based trust score component: starts at 100, drops on threat signals.
    */
-  public calculateFinalTrustScore(ruleScore: number, mlResult: MLPredictionResult): number {
-    // If ML detects an anomaly, subtract risk penalty (0-25)
-    let score = ruleScore;
-    if (mlResult.isAnomaly && mlResult.riskPenalty > 0) {
-      score -= mlResult.riskPenalty;
-    }
-    return Math.min(100, Math.max(0, Math.round(score)));
+  public calculateRuleBasedScore(session: ActiveSession): number {
+    const { totalDeductions } = this.evaluateRuleDeductions(session);
+    return Math.max(0, Math.min(100, 100 - totalDeductions));
   }
 
   /**
    * Full dynamic trust evaluation pipeline:
-   * Request -> Rule Score -> ML Anomaly Score -> Final Trust Score ->
-   * Risk Level -> Alert Evaluation -> NodeMailer Email -> Audit Trail.
+   * Request -> Rule Score -> Isolation Forest Anomaly -> Final Trust Score ->
+   * Risk Level -> Access Mode -> Alert Evaluation -> NodeMailer Email -> Audit Trail.
    */
   public async evaluateSessionTrust(
     session: ActiveSession,
@@ -104,34 +108,36 @@ class TrustEngine {
     user?: User,
     reqResource: string = "/api/continuous-eval"
   ): Promise<TrustEngineEvaluation> {
-    const previousScore = session.currentTrustScore;
+    const previousScore = session.currentTrustScore ?? 100;
 
-    // If session is already blocked and unverified, preserve blocked status
-    if (session.status === "Blocked" && !session.otpVerified) {
-      session.currentTrustScore = Math.min(session.currentTrustScore, 40);
+    // If session is already critically blocked and unverified, preserve blocked state
+    if (session.status === "Blocked" && !session.otpVerified && previousScore < trustConfig.thresholds.criticalMax) {
+      session.currentTrustScore = Math.min(session.currentTrustScore, 35);
       return {
         previousScore,
         finalScore: session.currentTrustScore,
         ruleBasedScore: session.currentTrustScore,
         hybridResult: {
-          ruleRisk: 60,
+          ruleRisk: 65,
           ruleTrust: session.currentTrustScore,
-          isolationForestScore: 0.0,
+          isolationForestScore: -0.05,
           normalizedAnomalyScore: 1.0,
           mlRisk: 25.0,
           finalTrustScore: session.currentTrustScore,
           isAnomaly: true,
-          mlServiceStatus: "AVAILABLE"
+          mlServiceStatus: "AVAILABLE",
+          anomalyReasons: ["Session locked due to critical security degradation"]
         },
-        riskLevel: RiskLevel.Critical,
-        policyDecision: "TERMINATE_SESSION",
+        riskLevel: RiskLevel.CRITICAL,
+        accessMode: AccessMode.BLOCKED,
+        policyDecision: "BLOCKED",
         reasons: ["Session locked due to critical security degradation"],
         alertTriggered: false,
         alertSuppressedByCooldown: true
       };
     }
 
-    // 1-3. Call Hybrid Trust Service (reusing existing rule calculation + scikit-learn ML)
+    // 1-3. Call Hybrid Trust Service (reusing explainable rules + scikit-learn ML)
     const hybridResult = await hybridTrustService.calculateHybridTrust(session);
     const finalScore = hybridResult.finalTrustScore;
     const ruleScore = hybridResult.ruleTrust;
@@ -140,15 +146,30 @@ class TrustEngine {
     session.currentTrustScore = finalScore;
     session.lastActivityTime = new Date().toISOString();
 
-    // Enforce session status based on configurable thresholds
-    if (finalScore <= 50) { // Phase 14 rule: 0-50 -> TERMINATE_SESSION
+    // Enforce session status based on centralized thresholds
+    if (finalScore < trustConfig.thresholds.criticalMax) { // < 40: Critical Risk / Blocked
       session.status = "Blocked";
-    } else if (session.status === "Blocked" && finalScore > 50) {
+    } else if (session.status === "Blocked" && finalScore >= trustConfig.thresholds.criticalMax) {
       session.status = "Active";
     }
 
     const currentRisk = getRiskLevel(finalScore);
+    const accessMode = getAccessModeForScore(finalScore);
     const policyDecision = getPolicyDecisionForRisk(currentRisk);
+
+    // Collect explainable reasons for security audit
+    const activeReasons: string[] = [];
+    if (hybridResult.riskFactors) {
+      for (const [factor, pts] of Object.entries(hybridResult.riskFactors)) {
+        activeReasons.push(`${factor}: -${pts} pts`);
+      }
+    }
+    if (hybridResult.anomalyReasons && hybridResult.anomalyReasons.length > 0) {
+      activeReasons.push(...hybridResult.anomalyReasons);
+    }
+    if (activeReasons.length === 0) {
+      activeReasons.push("Session verified within normal zero trust parameters");
+    }
 
     // 5. Evaluate Alert Thresholds & Cooldowns
     const alertEval: AlertEvaluationResult = alertManager.evaluateAlert(
@@ -157,13 +178,12 @@ class TrustEngine {
       finalScore,
       user,
       reqResource,
-      hybridResult.isolationForestScore, // Use the real scikit-learn decision function score
+      hybridResult.isolationForestScore,
       eventType
     );
 
     // 6. If alert qualified, dispatch email via NodeMailer asynchronously
     if (alertEval.shouldAlert && alertEval.securityAlert) {
-      // Non-blocking dispatch
       alertManager.dispatchAlertEmail(alertEval.securityAlert, (result) => {
         if (alertEval.auditEntry && alertEval.auditEntry.emailAlertDetails) {
           alertEval.auditEntry.emailAlertDetails.status = result.success 
@@ -196,8 +216,9 @@ class TrustEngine {
       ruleBasedScore: ruleScore,
       hybridResult,
       riskLevel: currentRisk,
+      accessMode,
       policyDecision,
-      reasons: alertEval.reasons,
+      reasons: activeReasons,
       alertTriggered: alertEval.shouldAlert,
       alertSuppressedByCooldown: alertEval.isSuppressedByCooldown,
       securityAlert: alertEval.securityAlert,
