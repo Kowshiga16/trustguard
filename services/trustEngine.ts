@@ -59,7 +59,9 @@ class TrustEngine {
       factorBreakdown["Different IP / Network Route Drift"] = deductions.differentIp;
     }
 
-    if (session.simulatedNightAccess) {
+    const currentHour = new Date().getHours();
+    const isRealOffHours = currentHour < 7 || currentHour >= 19;
+    if (session.simulatedNightAccess || isRealOffHours) {
       totalDeductions += deductions.offHoursAccess;
       factorBreakdown["Off-Hours Registry Access"] = deductions.offHoursAccess;
     }

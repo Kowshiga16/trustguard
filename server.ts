@@ -1959,6 +1959,19 @@ async function startServer() {
       session.simulatedSpamTriggered = true;
     }
 
+    // Real-Time Cross-Jurisdiction Detection
+    if (user?.assignedJurisdiction) {
+      if (session.role === RoleName.VillageAdministrativeOfficer) {
+        if (record.villageId && user.assignedJurisdiction.villageId && record.villageId !== user.assignedJurisdiction.villageId) {
+          session.simulatedOutsideJurisdiction = true;
+        }
+      } else if (session.role === RoleName.RevenueInspector || session.role === RoleName.DeputyTahsildar) {
+        if (record.taluk && user.assignedJurisdiction.taluk && record.taluk.toLowerCase() !== user.assignedJurisdiction.taluk.toLowerCase()) {
+          session.simulatedOutsideJurisdiction = true;
+        }
+      }
+    }
+
     // 5. Dynamic Zero Trust & Isolation Forest Evaluation
     const evaluation = await trustEngine.evaluateSessionTrust(session, `Document View: Survey ${record.surveyNumber}`, user, req.path);
     const hr = evaluation.hybridResult;
@@ -1997,6 +2010,10 @@ async function startServer() {
 
     // 6b. Citizen role: only allow their own record
     if (session.role === RoleName.Citizen && user && record.ownerName !== user.name) {
+      session.failedActionCount = (session.failedActionCount || 0) + 1;
+      sessionActivityTracker.recordFailedOperation(session.id);
+      void updateSessionTrust(session, "Unauthorized Citizen Land Document Access Attempt", req.path);
+
       const deniedAudit: AuditLog = {
         id: `al_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
         userId: session.userId,
