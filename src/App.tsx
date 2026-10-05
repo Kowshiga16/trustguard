@@ -154,8 +154,12 @@ export default function App() {
               prev.status !== freshSession.status ||
               prev.failedActionCount !== freshSession.failedActionCount ||
               prev.otpVerified !== freshSession.otpVerified ||
+              prev.simulatedIpMismatch !== freshSession.simulatedIpMismatch ||
+              prev.simulatedDeviceMismatch !== freshSession.simulatedDeviceMismatch ||
               prev.simulatedOutsideJurisdiction !== freshSession.simulatedOutsideJurisdiction ||
-              prev.simulatedSpamTriggered !== freshSession.simulatedSpamTriggered
+              prev.simulatedSpamTriggered !== freshSession.simulatedSpamTriggered ||
+              prev.currentRequestIp !== freshSession.currentRequestIp ||
+              prev.requiresOtp !== freshSession.requiresOtp
             ) {
               return { ...prev, ...freshSession };
             }
@@ -395,6 +399,7 @@ export default function App() {
   async function handleRequestOtp(): Promise<void> {
     if (!session?.id) return;
     try {
+      setSession(prev => prev ? { ...prev, requiresOtp: true } : null);
       await safeFetchJson("/api/security/request-otp", {
         method: "POST",
         headers: { 
@@ -929,6 +934,7 @@ export default function App() {
       <Navigation
         session={session}
         onLogout={handleLogout}
+        onRequestOtp={handleRequestOtp}
       />
 
       {/* Master Content Portal Layout */}
@@ -937,6 +943,34 @@ export default function App() {
         {/* Left Side: Operations Dashboard (7 or 8 cols) */}
         <div className="lg:col-span-8 space-y-6">
           
+          {/* Automatic Real-Time Security Alert Notification (Criterion 2: IP Route Shift) */}
+          {session.simulatedIpMismatch && (
+            <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-xl shadow-xs flex items-start gap-3.5 border border-amber-200/60">
+              <ShieldAlert className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+              <div className="flex-1">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <span>⚠ Security Alert: Network / IP Change Detected</span>
+                  </h4>
+                  <span className="text-[10px] font-mono bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded font-extrabold border border-amber-300">
+                    -15 pts
+                  </span>
+                </div>
+                <p className="text-xs text-amber-800 mt-1">
+                  <b>Risk Factor:</b> Different IP / Network Route Shift (Observed IP shifted to <code className="bg-amber-100 font-mono font-bold px-1 rounded text-amber-900">{session.currentRequestIp || session.ipAddress}</code>).
+                </p>
+                <div className="mt-2 text-[11px] font-semibold text-amber-900 flex items-center gap-4">
+                  <span>Trust Score: <span className="line-through text-slate-500 font-normal">100</span> → <span className="text-amber-700 font-extrabold">{session.currentTrustScore}</span></span>
+                  {session.currentTrustScore <= (session.roleThreshold || 60) && (
+                    <span className="text-rose-700 font-bold bg-rose-100/90 border border-rose-200 px-2 py-0.5 rounded text-[10px]">
+                      Step-Up OTP Challenge Triggered
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Quick Header Stats */}
           <StatsDashboard
             stats={stats}

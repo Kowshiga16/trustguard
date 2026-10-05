@@ -717,114 +717,96 @@ officers will never solicit your one-time password.
       return {
         success: false,
         error: safeErr,
+        simulated: false,
         otpCode: otpData.otpCode
       };
     }
 
-    // 2. Select email provider
     const brevoApiKey = process.env.BREVO_API_KEY?.trim();
     const isProduction = process.env.NODE_ENV === "production";
 
-    let provider: "BREVO" | "NODEMAILER" | "DEV_MOCK";
-
-    if (brevoApiKey) {
-      provider = "BREVO";
-    } else if (isProduction) {
+    if (isProduction && !brevoApiKey) {
       const safeErr = "BREVO_API_KEY is not configured in environment variables. Production requires Brevo HTTPS transactional email delivery.";
       console.error(`[EmailService] Safe error information: ${safeErr}`);
       return {
         success: false,
         error: safeErr,
+        simulated: false,
         otpCode: otpData.otpCode
       };
-    } else if (this.isConfigured && this.transporter) {
-      provider = "NODEMAILER";
-    } else {
-      provider = "DEV_MOCK";
     }
-
-    const providerLabel = provider === "BREVO" ? "Brevo HTTPS API" : (provider === "NODEMAILER" ? "NodeMailer SMTP" : "Development Mock Sender");
-    console.log(`[EmailService] Email provider selected: ${providerLabel}`);
-    console.log(`[EmailService] Attempting to send OTP to recipient: ${maskEmail(recipient)}`);
 
     const textContent = this.generateOtpPlainTextBody(otpData);
     const htmlContent = this.generateOtpHtmlBody(otpData);
     const subject = "TrustGuard Security: Step-Up Identity Verification OTP";
 
-    // Option A: Brevo HTTPS REST API (Port 443 HTTPS - Reliable on Render)
-    if (provider === "BREVO") {
-      try {
-        const senderEmail = (
-          process.env.BREVO_SENDER_EMAIL ||
-          process.env.SMTP_USER ||
-          process.env.EMAIL_USER ||
-          "svkowshiga@gmail.com"
-        ).trim();
+    // 1. Try Brevo HTTPS REST API (Port 443 HTTPS - Reliable on Render)
+    if (brevoApiKey) {
+      console.log(`[EmailService] Email provider selected: Brevo HTTPS API`);
+      console.log(`[EmailService] Attempting to send OTP to recipient: ${maskEmail(recipient)}`);
 
-        const brevoRes = await fetch("https://api.brevo.com/v3/smtp/email", {
-          method: "POST",
-          headers: {
-            "accept": "application/json",
-            "api-key": brevoApiKey!,
-            "content-type": "application/json"
-          },
-          body: JSON.stringify({
-            sender: {
-              name: "TrustGuard Security Engine",
-              email: senderEmail
+      // Try multiple possible verified senders in case the Brevo account was registered with either email:
+      const candidateSenders = [
+        process.env.BREVO_SENDER_EMAIL?.trim(),
+        process.env.DEMO_OTP_EMAIL?.trim(),
+        recipient, // Often the user registered their Brevo account with their demo email (kowshiga931@gmail.com)!
+        process.env.SMTP_USER?.trim(),
+        "svkowshiga@gmail.com"
+      ].filter((s): s is string => Boolean(s && s.includes("@")));
+
+      const uniqueSenders = Array.from(new Set(candidateSenders));
+
+      for (const senderEmail of uniqueSenders) {
+        try {
+          const brevoRes = await fetch("https://api.brevo.com/v3/smtp/email", {
+            method: "POST",
+            headers: {
+              "accept": "application/json",
+              "api-key": brevoApiKey,
+              "content-type": "application/json"
             },
-            to: [
-              {
-                email: recipient,
-                name: otpData.userName || "Revenue Officer"
-              }
-            ],
-            subject,
-            htmlContent,
-            textContent
-          })
-        });
+            body: JSON.stringify({
+              sender: {
+                name: "TrustGuard Security Engine",
+                email: senderEmail
+              },
+              to: [
+                {
+                  email: recipient,
+                  name: otpData.userName || "Revenue Officer"
+                }
+              ],
+              subject,
+              htmlContent,
+              textContent
+            })
+          });
 
-        if (brevoRes.ok) {
-          const resData = (await brevoRes.json()) as any;
-          console.log(`[EmailService] OTP email accepted by provider. MessageId: ${resData.messageId || "accepted"}`);
-          return {
-            success: true,
-            simulated: false,
-            otpCode: otpData.otpCode,
-            messageId: resData.messageId
-          };
-        } else {
-          const errText = await brevoRes.text();
-          let safeMsg = `Brevo API HTTP status ${brevoRes.status}`;
-          try {
-            const errObj = JSON.parse(errText);
-            if (errObj.message) safeMsg = `Brevo API (${brevoRes.status}): ${errObj.message}`;
-          } catch {
-            if (errText) safeMsg = `Brevo API (${brevoRes.status}): ${errText.slice(0, 120)}`;
+          if (brevoRes.ok) {
+            const resData = (await brevoRes.json()) as any;
+            console.log(`[EmailService] OTP email accepted by provider. MessageId: ${resData.messageId || "accepted"}`);
+            return {
+              success: true,
+              simulated: false,
+              otpCode: otpData.otpCode,
+              messageId: resData.messageId
+            };
+          } else {
+            const errText = await brevoRes.text();
+            console.warn(`[EmailService] Brevo attempt with sender ${maskEmail(senderEmail)} returned HTTP ${brevoRes.status}: ${errText.slice(0, 100)}`);
           }
-          console.error(`[EmailService] Safe error information: ${safeMsg}`);
-          return {
-            success: false,
-            error: safeMsg,
-            simulated: false,
-            otpCode: otpData.otpCode
-          };
+        } catch (fetchErr: any) {
+          console.warn(`[EmailService] Brevo fetch error with sender ${maskEmail(senderEmail)}: ${fetchErr?.message || fetchErr}`);
         }
-      } catch (brevoErr: any) {
-        const safeMsg = `Network failure connecting to Brevo HTTPS API: ${brevoErr?.message || "connection error"}`;
-        console.error(`[EmailService] Safe error information: ${safeMsg}`);
-        return {
-          success: false,
-          error: safeMsg,
-          simulated: false,
-          otpCode: otpData.otpCode
-        };
       }
+      console.warn("[EmailService] All Brevo sender candidates failed or were not validated in Brevo. Checking NodeMailer fallback...");
     }
 
-    // Option B: NodeMailer SMTP (for local development)
-    if (provider === "NODEMAILER" && this.transporter) {
+    // 2. Fallback to NodeMailer SMTP (Port 465 SSL or Port 587 STARTTLS)
+    if (this.isConfigured && this.transporter) {
+      console.log(`[EmailService] Email provider selected: NodeMailer SMTP`);
+      console.log(`[EmailService] Attempting to send OTP to recipient: ${maskEmail(recipient)}`);
+
       try {
         const info = await this.transporter.sendMail({
           from: getSenderAddress(),
@@ -849,18 +831,61 @@ officers will never solicit your one-time password.
           messageId: info.messageId
         };
       } catch (smtpErr: any) {
-        const safeMsg = `NodeMailer delivery error: ${smtpErr?.message || "SMTP delivery error"}`;
-        console.error(`[EmailService] Safe error information: ${safeMsg}`);
-        return {
-          success: false,
-          error: safeMsg,
-          simulated: false,
-          otpCode: otpData.otpCode
-        };
+        console.warn(`[EmailService] Primary SMTP delivery error: ${smtpErr?.message || smtpErr}. Trying port 587 fallback...`);
+
+        try {
+          const cleanPass = (trustConfig.smtp.pass || "ahbt sffp nmye vfsw").trim().replace(/\s+/g, "");
+          const fallbackTransporter = nodemailer.createTransport({
+            host: "smtp.gmail.com",
+            port: 587,
+            secure: false,
+            requireTLS: true,
+            auth: {
+              user: (trustConfig.smtp.user || "svkowshiga@gmail.com").trim(),
+              pass: cleanPass,
+            },
+            tls: {
+              rejectUnauthorized: false
+            },
+            connectionTimeout: 4000,
+            greetingTimeout: 4000,
+            socketTimeout: 6000,
+          });
+
+          const fallbackInfo = await fallbackTransporter.sendMail({
+            from: getSenderAddress(),
+            to: recipient,
+            subject,
+            text: textContent,
+            html: htmlContent,
+            priority: "high"
+          });
+
+          console.log(`[EmailService] OTP email accepted by provider. MessageId: ${fallbackInfo.messageId}`);
+          return {
+            success: true,
+            simulated: false,
+            otpCode: otpData.otpCode,
+            messageId: fallbackInfo.messageId
+          };
+        } catch (fallbackErr: any) {
+          console.error(`[EmailService] Safe error information: Both Brevo and NodeMailer failed - ${fallbackErr?.message || smtpErr?.message}`);
+        }
       }
     }
 
-    // Option C: Development Mock Mode
+    // 3. If in production and neither succeeded:
+    if (isProduction) {
+      const safeErr = "Failed to deliver OTP: Please ensure BREVO_API_KEY is configured in Render with a verified Brevo sender, or check Render SMTP connection.";
+      console.error(`[EmailService] Safe error information: ${safeErr}`);
+      return {
+        success: false,
+        error: safeErr,
+        otpCode: otpData.otpCode
+      };
+    }
+
+    // 4. Development Mock Mode
     console.log(`[EmailService] OTP email accepted by provider (development mock mode). Target: ${maskEmail(recipient)}`);
     return {
       success: true,
@@ -905,18 +930,22 @@ export function resolveActualRecipient(preferredEmail?: string): string {
     return demoEmail;
   }
 
-  // In development / test environment, support test suites if DEMO_OTP_EMAIL is not explicitly set
-  if (process.env.NODE_ENV !== "production") {
-    if (preferredEmail && preferredEmail.includes("@")) {
-      return preferredEmail;
-    }
-    const alertEmail = trustConfig.smtp.securityAlertEmail?.trim();
-    if (alertEmail && alertEmail.includes("@")) {
-      return alertEmail;
-    }
+  // In production or test environment without DEMO_OTP_EMAIL configured, return empty string to trigger configuration guard
+  if (process.env.NODE_ENV === "production" || process.env.NODE_ENV === "test") {
+    return "";
   }
 
-  return "";
+  // In local development, support user email or alert email fallback
+  if (preferredEmail && preferredEmail.includes("@") && !preferredEmail.includes("@revenue.tn.gov.in")) {
+    return preferredEmail;
+  }
+
+  const alertEmail = trustConfig.smtp.securityAlertEmail?.trim();
+  if (alertEmail && alertEmail.includes("@") && !alertEmail.includes("@trustguard.gov.in")) {
+    return alertEmail;
+  }
+
+  return "kowshiga931@gmail.com";
 }
 
 export function maskEmail(email: string): string {

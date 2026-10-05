@@ -4,17 +4,19 @@
  */
 
 import React from "react";
-import { ShieldCheck, UserCheck, LogOut } from "lucide-react";
+import { ShieldCheck, UserCheck, LogOut, KeyRound } from "lucide-react";
 import { ActiveSession } from "../types";
 
 interface NavigationProps {
   session: ActiveSession | null;
   onLogout: () => void;
+  onRequestOtp?: () => Promise<void>;
 }
 
 export default function Navigation({
   session,
-  onLogout
+  onLogout,
+  onRequestOtp
 }: NavigationProps) {
 
   return (
@@ -45,6 +47,18 @@ export default function Navigation({
                 Role: <b className="text-indigo-600 uppercase tracking-wider font-extrabold">{session.role.replace("Administrative ", "")}</b>
               </span>
             </div>
+
+            {/* Step-Up OTP Verification Trigger */}
+            {onRequestOtp && (
+              <button
+                onClick={onRequestOtp}
+                title="Trigger Step-Up OTP Challenge"
+                className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-2xs"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-rose-600" />
+                <span>Verify via OTP</span>
+              </button>
+            )}
 
             {/* Real-time IP & Network Route Indicator */}
             <div className="hidden md:flex flex-col items-end px-3 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-mono">

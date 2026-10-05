@@ -1478,11 +1478,17 @@ async function startServer() {
       }
     }
     
+    const needsOtp = !session.otpVerified && (session.currentTrustScore <= roleThreshold || session.status === "Blocked");
+    session.requiresOtp = needsOtp;
+    session.roleThreshold = roleThreshold;
+
     // Enrich with latest hybrid trust metrics
     const hybridData = evaluation.hybridResult;
 
     res.json({
       ...session,
+      requiresOtp: needsOtp,
+      roleThreshold,
       hybridData
     });
   });

@@ -180,6 +180,8 @@ export interface ActiveSession {
   realLoginUserAgent?: string;
   initialAuthenticatedIp?: string;
   currentRequestIp?: string;
+  requiresOtp?: boolean;
+  roleThreshold?: number;
 }
 
 export interface TrustLog {

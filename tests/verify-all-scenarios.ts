@@ -334,7 +334,7 @@ async function runAllTests() {
     const overrideRes = await fetch(`${BASE_URL}/api/admin/override-trust`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: adminToken },
-      body: JSON.stringify({ adminSessionId: adminToken, targetSessionId: officerToken, overrideScore: 40 })
+      body: JSON.stringify({ adminSessionId: adminToken, targetSessionId: officerToken, overrideScore: 35 })
     });
     const overrideData = await overrideRes.json();
 

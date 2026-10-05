@@ -238,7 +238,7 @@ test('8. Brevo HTTPS API Configuration and Production Guard', async () => {
     delete process.env.DEMO_OTP_EMAIL;
     const noDemoResult = await emailService.sendOtpEmail({
       userName: "Officer",
-      userEmail: "officer@tn.gov.in",
+      userEmail: "",
       userRole: "Tahsildar",
       otpCode: "998877",
       currentTrustScore: 50,

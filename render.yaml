@@ -49,8 +49,12 @@ services:
         value: true
       - key: SECURITY_ALERT_EMAIL
         value: kowshiga931@gmail.com
-      - key: OVERRIDE_RECIPIENT_EMAIL
+      - key: DEMO_OTP_EMAIL
         value: kowshiga931@gmail.com
+      - key: BREVO_SENDER_EMAIL
+        value: kowshiga931@gmail.com
+      - key: BREVO_API_KEY
+        sync: false
       - key: SMTP_HOST
         value: smtp.gmail.com
       - key: SMTP_PORT
