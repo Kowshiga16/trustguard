@@ -40,7 +40,7 @@ services:
   # 3. TrustGuard Fullstack Web Application (Node Express + React SPA)
   web:
     build:
-      context: ./Project1
+      context: .
       dockerfile: Dockerfile
     container_name: trustguard-web
     restart: unless-stopped

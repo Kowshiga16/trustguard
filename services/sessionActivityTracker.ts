@@ -138,8 +138,18 @@ class SessionActivityTracker {
     state.requestTimestamps = state.requestTimestamps.filter(t => now - t <= 60000);
     const requestsPerMinute = state.requestTimestamps.length;
 
-    // Login hour: current local hour (0-23), or 23 if simulated night access
-    const currentHour = new Date().getHours();
+    // Login hour: current local hour (0-23) in Asia/Kolkata, or 23 if simulated night access
+    let currentHour = new Date().getHours();
+    try {
+      const istStr = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Kolkata',
+        hour: 'numeric',
+        hour12: false
+      }).format(new Date());
+      currentHour = parseInt(istStr, 10);
+    } catch {
+      currentHour = new Date().getHours();
+    }
     const loginHour = session.simulatedNightAccess ? 23 : currentHour;
 
     // Session duration

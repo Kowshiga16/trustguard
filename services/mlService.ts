@@ -22,6 +22,10 @@ export interface MLPredictionResult {
 }
 
 class MLService {
+  private isFastApiAvailable: boolean = true;
+  private lastCheckTimestamp: number = 0;
+  private readonly CHECK_COOLDOWN_MS = 30000; // 30s cooldown before retrying offline FastAPI microservice
+
   /**
    * Prepares 6-dimensional feature vector matching the activity dataset.
    */
@@ -36,50 +40,68 @@ class MLService {
   public async getAnomalyScore(session: ActiveSession): Promise<MLPredictionResult> {
     const behavioral = this.extractFeatures(session);
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), trustConfig.ml?.timeoutMs || 2000);
+    let serviceUrl = trustConfig.ml?.serviceUrl || "http://127.0.0.1:8000/predict";
+    if (!serviceUrl.endsWith("/predict")) {
+      serviceUrl = serviceUrl.replace(/\/+$/, "") + "/predict";
+    }
 
-      let serviceUrl = trustConfig.ml?.serviceUrl || "http://127.0.0.1:8000/predict";
-      if (!serviceUrl.endsWith("/predict")) {
-        serviceUrl = serviceUrl.replace(/\/+$/, "") + "/predict";
+    const isLocalhost = serviceUrl.includes("127.0.0.1") || serviceUrl.includes("localhost");
+    const isProduction = process.env.NODE_ENV === "production";
+
+    // If FastAPI was marked unavailable recently, bypass network call immediately to prevent request stalling
+    const cooldownActive = !this.isFastApiAvailable && (Date.now() - this.lastCheckTimestamp < this.CHECK_COOLDOWN_MS);
+
+    // If running in production container where no custom ML_SERVICE_URL was provided, use fast local engine directly
+    const defaultLocalhostInProd = isProduction && isLocalhost && !process.env.ML_SERVICE_URL;
+
+    if (!cooldownActive && !defaultLocalhostInProd) {
+      try {
+        const controller = new AbortController();
+        const timeoutMs = isLocalhost ? 250 : (trustConfig.ml?.timeoutMs || 1500);
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        const response = await fetch(serviceUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(behavioral),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          this.isFastApiAvailable = true;
+          const data = await response.json();
+          const nas = typeof data.normalized_anomaly_score === "number"
+            ? data.normalized_anomaly_score
+            : (typeof data.anomalyScore === "number" ? data.anomalyScore : 0.0);
+          
+          const isAnomaly = Boolean(data.is_anomaly ?? data.isAnomaly);
+          const riskPenalty = typeof data.ml_risk === "number"
+            ? Math.round(data.ml_risk)
+            : (typeof data.riskPenalty === "number" ? data.riskPenalty : (isAnomaly ? Math.round(nas * 25) : 0));
+
+          const reasons: string[] = Array.isArray(data.anomaly_reasons) ? data.anomaly_reasons : [];
+          const details = data.details || (isAnomaly ? "Isolation Forest detected anomalous activity pattern" : "Behavior is within normal envelope");
+
+          return {
+            anomalyScore: Math.min(1.0, Math.max(0.0, parseFloat(nas.toFixed(4)))),
+            isolationForestScore: typeof data.isolation_forest_score === "number" ? data.isolation_forest_score : 0.15,
+            isAnomaly,
+            riskPenalty,
+            source: "fastapi",
+            anomalyReasons: reasons,
+            details
+          };
+        } else {
+          this.isFastApiAvailable = false;
+          this.lastCheckTimestamp = Date.now();
+        }
+      } catch (err: any) {
+        // Mark unavailable with cooldown so next requests don't wait
+        this.isFastApiAvailable = false;
+        this.lastCheckTimestamp = Date.now();
       }
-
-      const response = await fetch(serviceUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(behavioral),
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        const data = await response.json();
-        const nas = typeof data.normalized_anomaly_score === "number"
-          ? data.normalized_anomaly_score
-          : (typeof data.anomalyScore === "number" ? data.anomalyScore : 0.0);
-        
-        const isAnomaly = Boolean(data.is_anomaly ?? data.isAnomaly);
-        const riskPenalty = typeof data.ml_risk === "number"
-          ? Math.round(data.ml_risk)
-          : (typeof data.riskPenalty === "number" ? data.riskPenalty : (isAnomaly ? Math.round(nas * 25) : 0));
-
-        const reasons: string[] = Array.isArray(data.anomaly_reasons) ? data.anomaly_reasons : [];
-        const details = data.details || (isAnomaly ? "Isolation Forest detected anomalous activity pattern" : "Behavior is within normal envelope");
-
-        return {
-          anomalyScore: Math.min(1.0, Math.max(0.0, parseFloat(nas.toFixed(4)))),
-          isolationForestScore: typeof data.isolation_forest_score === "number" ? data.isolation_forest_score : 0.15,
-          isAnomaly,
-          riskPenalty,
-          source: "fastapi",
-          anomalyReasons: reasons,
-          details
-        };
-      }
-    } catch (err: any) {
-      // Python service offline or network timeout: seamlessly use trained local engine
     }
 
     return this.evaluateLocalTrainedModel(session, behavioral);

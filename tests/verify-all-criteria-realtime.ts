@@ -80,8 +80,8 @@ test("3. Criterion 3: Cross-Jurisdiction Access triggers -20 pts deduction in re
   const baselineTrust = initialResult.finalTrustScore;
 
   // VAO assigned to Village v1 accesses record in Village v2
-  const vaoJurisdictionVillage = "v1";
-  const accessedRecordVillage = "v2";
+  const vaoJurisdictionVillage: string = "v1";
+  const accessedRecordVillage: string = "v2";
   if (accessedRecordVillage !== vaoJurisdictionVillage) {
     session.simulatedOutsideJurisdiction = true;
   }

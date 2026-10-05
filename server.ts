@@ -4,6 +4,7 @@
  */
 
 import "dotenv/config";
+import fs from "fs";
 import { randomInt } from "crypto";
 import express from "express";
 import path from "path";
@@ -33,6 +34,31 @@ import { alertManager } from "./services/alertManager";
 import { emailService, resolveActualRecipient } from "./services/emailService";
 import { sessionActivityTracker } from "./services/sessionActivityTracker";
 import { hybridTrustService } from "./services/hybridTrustService";
+
+/**
+ * Safely extracts real client IP address accounting for reverse proxies (Render, Cloudflare, Nginx, AWS ELB).
+ */
+export function extractClientIp(req: express.Request): string {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (forwarded) {
+    const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    const clientIp = raw.split(",")[0].trim();
+    if (clientIp) {
+      return clientIp.replace(/^::ffff:/, "");
+    }
+  }
+  const ip = req.ip || req.socket?.remoteAddress || "127.0.0.1";
+  return ip.replace(/^::ffff:/, "");
+}
+
+/**
+ * Safely extracts client User Agent string across single or array headers.
+ */
+export function extractClientUserAgent(req: express.Request): string {
+  const ua = req.headers["user-agent"];
+  if (Array.isArray(ua)) return ua[0] || "Unknown";
+  return (ua || "Unknown").trim();
+}
 
 const PORT = parseInt(process.env.PORT || "3000", 10);
 const MONGO_URI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/trustguard";
@@ -822,6 +848,7 @@ async function startServer() {
   }
 
   const app = express();
+  app.set("trust proxy", 1);
   app.use(express.json({ strict: true }));
   app.use(express.urlencoded({ extended: true }));
 
@@ -874,8 +901,8 @@ async function startServer() {
         });
       }
 
-      const currentIp = (req.headers['x-forwarded-for'] as string) || req.ip || "127.0.0.1";
-      const currentUserAgent = req.headers['user-agent'] || "Unknown";
+      const currentIp = extractClientIp(req);
+      const currentUserAgent = extractClientUserAgent(req);
 
       if (session.realLoginIp && currentIp !== session.realLoginIp && !session.otpVerified) {
         session.simulatedIpMismatch = true;
@@ -1342,8 +1369,8 @@ async function startServer() {
       simulatedIdleTriggered: false,
       failedActionCount: 0,
       otpVerified: false,
-      realLoginIp: req.ip || req.headers['x-forwarded-for'] as string || "127.0.0.1",
-      realLoginUserAgent: req.headers['user-agent'] || "Unknown"
+      realLoginIp: customIp || extractClientIp(req),
+      realLoginUserAgent: customDevice || extractClientUserAgent(req)
     };
 
     const initialEval = await trustEngine.evaluateSessionTrust(
@@ -1418,11 +1445,8 @@ async function startServer() {
     }
 
     // Passive real-time telemetry detection
-    const currentIp = ((req.headers['x-forwarded-for'] as string)?.split(',')[0].trim()) || 
-                      req.socket.remoteAddress || 
-                      req.ip || 
-                      "127.0.0.1";
-    const currentUserAgent = (req.headers['user-agent'] as string) || "Unknown";
+    const currentIp = extractClientIp(req);
+    const currentUserAgent = extractClientUserAgent(req);
 
     if (session.realLoginIp && currentIp !== session.realLoginIp && !session.otpVerified) {
       session.simulatedIpMismatch = true;
@@ -1638,8 +1662,8 @@ async function startServer() {
       session.simulatedSpamTriggered = false;
 
       // Synchronize current IP and User Agent so they match the verified session
-      const currentIp = ((req.headers['x-forwarded-for'] as string)?.split(',')[0].trim()) || req.ip || session.ipAddress;
-      const currentUserAgent = (req.headers['user-agent'] as string) || session.realLoginUserAgent;
+      const currentIp = extractClientIp(req);
+      const currentUserAgent = extractClientUserAgent(req);
       session.ipAddress = currentIp;
       session.realLoginIp = currentIp;
       if (currentUserAgent && currentUserAgent !== "Unknown") {
@@ -1952,8 +1976,8 @@ async function startServer() {
     }
 
     // 2. Capture server-side observed client IP & context
-    const observedIp = ((req.headers['x-forwarded-for'] as string)?.split(',')[0].trim()) || req.ip || req.socket.remoteAddress || "127.0.0.1";
-    const userAgent = (req.headers['user-agent'] as string) || "Unknown";
+    const observedIp = extractClientIp(req);
+    const userAgent = extractClientUserAgent(req);
 
     // 3. Rate limiting check (Throttles rapid automated scraping)
     const withinLimit = checkDocAccessRateLimit(session.id, 10, 10000);
@@ -2804,19 +2828,26 @@ async function startServer() {
 
   await seedPropertiesIntoMongoUserCollection();
 
-  // Vite development / production asset mounting
-  if (process.env.NODE_ENV !== "production") {
+  // Vite development vs production asset mounting
+  const distPath = path.join(process.cwd(), "dist");
+  const hasBuiltDist = fs.existsSync(path.join(distPath, "index.html"));
+
+  if (process.env.NODE_ENV === "production" || hasBuiltDist) {
+    console.log(`[TrustGuard] Serving production static bundle from ${distPath}`);
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      if (req.path.startsWith("/api/")) {
+        return res.status(404).json({ error: "not_found", message: `API route ${req.method} ${req.path} not found` });
+      }
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  } else {
+    console.log(`[TrustGuard] Starting Vite in development middleware mode`);
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
   }
 
   app.listen(PORT, "0.0.0.0", () => {

@@ -7,9 +7,8 @@ services:
     env: python
     region: oregon
     plan: free
-    rootDir: ml-service
-    buildCommand: pip install -r requirements.txt && python -c "from app import load_or_train_model; load_or_train_model()"
-    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    buildCommand: pip install -r requirements-ml.txt && python ml_service.py --train
+    startCommand: uvicorn ml_service:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     autoDeploy: true
     envVars:
@@ -22,7 +21,6 @@ services:
     env: node
     region: oregon
     plan: free
-    rootDir: Project1
     buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /api/system/stats
@@ -31,7 +29,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: MONGO_URI
-        sync: false # Provide your MongoDB Atlas Connection String
+        sync: false # Optional: Provide your MongoDB Atlas Connection String if desired
       - key: MONGO_DB_NAME
         value: trustguard
       - key: JWT_SECRET
@@ -44,7 +42,7 @@ services:
           name: trustguard-ml
           property: host
       - key: ML_TIMEOUT_MS
-        value: 2000
+        value: 1500
       - key: ML_SCORE_WEIGHT
         value: 0.25
       - key: ENABLE_EMAIL_ALERTS

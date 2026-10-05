@@ -59,7 +59,17 @@ class TrustEngine {
       factorBreakdown["Different IP / Network Route Drift"] = deductions.differentIp;
     }
 
-    const currentHour = new Date().getHours();
+    let currentHour = new Date().getHours();
+    try {
+      const istStr = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Kolkata',
+        hour: 'numeric',
+        hour12: false
+      }).format(new Date());
+      currentHour = parseInt(istStr, 10);
+    } catch {
+      currentHour = new Date().getHours();
+    }
     const isRealOffHours = currentHour < 7 || currentHour >= 19;
     if (session.simulatedNightAccess || isRealOffHours) {
       totalDeductions += deductions.offHoursAccess;
