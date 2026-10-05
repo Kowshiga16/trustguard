@@ -210,3 +210,46 @@ test('7. NodeMailer OTP Generation and Resilient Delivery', async () => {
   assert.equal(otpResult.otpCode, "654321", "Must return the generated OTP code");
   assert.ok(otpResult.simulated !== undefined, "Must indicate simulation or live transport mode");
 });
+
+test('8. Brevo HTTPS API Configuration and Production Guard', async () => {
+  const prevEnv = process.env.NODE_ENV;
+  const prevKey = process.env.BREVO_API_KEY;
+  const prevDemo = process.env.DEMO_OTP_EMAIL;
+
+  try {
+    // A. Verify that in production without BREVO_API_KEY, a useful configuration error is returned
+    process.env.NODE_ENV = "production";
+    delete process.env.BREVO_API_KEY;
+    process.env.DEMO_OTP_EMAIL = "test-officer@gmail.com";
+
+    const prodResult = await emailService.sendOtpEmail({
+      userName: "Officer",
+      userEmail: "officer@tn.gov.in",
+      userRole: "Tahsildar",
+      otpCode: "998877",
+      currentTrustScore: 50,
+      roleThreshold: 70
+    });
+
+    assert.strictEqual(prodResult.success, false, "Production must fail if BREVO_API_KEY is not configured");
+    assert.ok(prodResult.error?.includes("BREVO_API_KEY is not configured"), "Error must clearly cite missing BREVO_API_KEY");
+
+    // B. Verify that when DEMO_OTP_EMAIL is missing in production, it returns a useful error
+    delete process.env.DEMO_OTP_EMAIL;
+    const noDemoResult = await emailService.sendOtpEmail({
+      userName: "Officer",
+      userEmail: "officer@tn.gov.in",
+      userRole: "Tahsildar",
+      otpCode: "998877",
+      currentTrustScore: 50,
+      roleThreshold: 70
+    });
+    assert.strictEqual(noDemoResult.success, false, "Production must fail if DEMO_OTP_EMAIL is not configured");
+    assert.ok(noDemoResult.error?.includes("DEMO_OTP_EMAIL is not configured"), "Error must clearly cite missing DEMO_OTP_EMAIL");
+  } finally {
+    process.env.NODE_ENV = prevEnv;
+    if (prevKey) process.env.BREVO_API_KEY = prevKey; else delete process.env.BREVO_API_KEY;
+    if (prevDemo) process.env.DEMO_OTP_EMAIL = prevDemo; else delete process.env.DEMO_OTP_EMAIL;
+  }
+});
+

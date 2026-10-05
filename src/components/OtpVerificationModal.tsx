@@ -87,9 +87,13 @@ export default function OtpVerificationModal({
         })
       });
       const data = await res.json();
-      if (data.emailStatus) setDeliveryStatus(data.emailStatus);
-      setResendSuccess(true);
-      setTimeout(() => setResendSuccess(false), 4000);
+      if (!res.ok || !data.success) {
+        setErrorMsg(data.message || "Failed to resend OTP. Please check email provider configuration.");
+      } else {
+        if (data.emailStatus) setDeliveryStatus(data.emailStatus);
+        setResendSuccess(true);
+        setTimeout(() => setResendSuccess(false), 4000);
+      }
     } catch (err: any) {
       setErrorMsg("Failed to resend OTP. Please try again.");
     } finally {

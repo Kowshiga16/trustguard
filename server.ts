@@ -31,7 +31,7 @@ import {
 import { trustConfig, RiskLevel, getRiskLevel, getPolicyDecisionForRisk, getRoleOtpThreshold } from "./services/trustConfig";
 import { trustEngine } from "./services/trustEngine";
 import { alertManager } from "./services/alertManager";
-import { emailService, resolveActualRecipient } from "./services/emailService";
+import { emailService, resolveActualRecipient, maskEmail } from "./services/emailService";
 import { sessionActivityTracker } from "./services/sessionActivityTracker";
 import { hybridTrustService } from "./services/hybridTrustService";
 
@@ -598,7 +598,7 @@ function generateOtp(): string {
 async function issueOtpForSession(
   session: ActiveSession, 
   triggerSource: string = "Dynamic Low-Trust Step-Up Verification"
-): Promise<{ code: string; emailStatus: string; simulated: boolean; error?: string }> {
+): Promise<{ code: string; emailStatus: string; simulated: boolean; error?: string; emailSent: boolean }> {
   const code = generateOtp();
   const roleThreshold = getRoleOtpThreshold(session.role);
   const user = users.find(u => u.id === session.userId);
@@ -620,7 +620,7 @@ async function issueOtpForSession(
 
   sessionOtpCodes.set(session.id, otpRecord);
 
-  // Dispatch OTP via NodeMailer
+  // Dispatch OTP via configured email provider (Brevo HTTPS in production, NodeMailer/mock in dev)
   try {
     const reasons = [
       `Trust score (${session.currentTrustScore}/100) is below role threshold (${roleThreshold}/100)`,
@@ -652,9 +652,8 @@ async function issueOtpForSession(
     console.log(`\n=======================================================================`);
     console.log(`  [TrustGuard STEP-UP OTP DISPATCH AUDIT]`);
     console.log(`  Officer:       ${session.userName} (${session.role})`);
-    console.log(`  Recipient:     ${recipientEmail}`);
-    console.log(`  OTP CODE:      >>> ${code} <<<`);
-    console.log(`  Delivery:      ${sendResult.success ? "DELIVERED TO INBOX (" + sendResult.messageId + ")" : "SMTP FAILED (" + sendResult.error + ")"}`);
+    console.log(`  Recipient:     ${maskEmail(recipientEmail)}`);
+    console.log(`  Delivery:      ${sendResult.success ? "DELIVERED (" + (sendResult.messageId || "accepted") + ")" : "FAILED (" + (sendResult.error || "delivery error") + ")"}`);
     console.log(`=======================================================================\n`);
 
     // Record step-up OTP issuance in audit trail
@@ -663,7 +662,7 @@ async function issueOtpForSession(
       userId: session.userId,
       userName: session.userName,
       role: session.role,
-      actionPerformed: `STEP_UP_OTP_ISSUED (Code dispatched to ${recipientEmail})`,
+      actionPerformed: `STEP_UP_OTP_ISSUED (Verification token dispatched)`,
       resourceAccessed: "SECURITY_OTP_GATEWAY",
       trustScoreAtAction: session.currentTrustScore,
       decision: "STEP-UP OTP",
@@ -677,8 +676,8 @@ async function issueOtpForSession(
       emailAlertSent: sendResult.success,
       emailAlertDetails: {
         alertId: sendResult.messageId,
-        recipient: recipientEmail,
-        subject: `TrustGuard Security: Step-Up Identity Verification OTP [${code}]`,
+        recipient: maskEmail(recipientEmail),
+        subject: `TrustGuard Security: Step-Up Identity Verification OTP`,
         status: otpRecord.emailStatus as any,
         sentAt: new Date().toISOString()
       },
@@ -690,10 +689,11 @@ async function issueOtpForSession(
       code,
       emailStatus: otpRecord.emailStatus,
       simulated: otpRecord.simulated,
-      error: sendResult.error
+      error: sendResult.error,
+      emailSent: otpRecord.emailSent
     };
   } catch (err: any) {
-    console.error("[NodeMailer OTP Error] Failed to dispatch OTP email:", err);
+    console.error("[EmailService] Safe error information: Failed to dispatch OTP email -", err?.message || err);
     otpRecord.emailSent = false;
     otpRecord.emailStatus = "FAILED";
     otpRecord.deliveryError = err?.message || String(err);
@@ -701,7 +701,8 @@ async function issueOtpForSession(
       code,
       emailStatus: "FAILED",
       simulated: false,
-      error: err?.message || String(err)
+      error: err?.message || String(err),
+      emailSent: false
     };
   }
 }
@@ -1613,19 +1614,21 @@ async function startServer() {
       otpRequired: session.currentTrustScore <= roleThreshold && !session.otpVerified,
       otpVerified: session.otpVerified,
       hasActiveOtp: !isExpired,
-      recipientEmail: activeOtp?.userEmail || recipientEmail,
-      activeOtpCode: activeOtp?.code,
+      recipientEmail: maskEmail(activeOtp?.userEmail || recipientEmail),
       emailStatus: activeOtp?.emailStatus || "NONE",
       deliveryError: activeOtp?.deliveryError
     });
   });
 
   app.post("/api/security/request-otp", async (req, res) => {
+    console.log("[OTP] Request received");
     const rawSessionId = req.body?.sessionId || (req.headers.authorization as string) || (req.headers["x-session-id"] as string) || (req.query?.sessionId as string);
     const session = getSessionById(rawSessionId);
     if (!session) {
       return res.status(404).json({ error: "Session not found", message: "Invalid or missing session identifier" });
     }
+
+    console.log(`[OTP] Request received for session: ${session.id} (User: ${session.userName}, Role: ${session.role})`);
 
     const triggerSource = req.body.reason || "Manual Step-Up OTP Verification Request";
     const forceResend = req.body.forceResend === true || triggerSource.toLowerCase().includes("resend");
@@ -1639,32 +1642,44 @@ async function startServer() {
       existingOtp.emailSent && 
       (Date.now() - existingOtp.createdAt < 60000);
 
-    let otpResult: { code: string; emailStatus: string; simulated: boolean; error?: string };
+    let otpResult: { code: string; emailStatus: string; simulated: boolean; error?: string; emailSent: boolean };
     if (!forceResend && isRecentAndValid && existingOtp) {
       otpResult = {
         code: existingOtp.code,
         emailStatus: existingOtp.emailStatus,
         simulated: existingOtp.simulated,
-        error: existingOtp.deliveryError
+        error: existingOtp.deliveryError,
+        emailSent: existingOtp.emailSent
       };
-      console.log(`[TrustGuard OTP] Active OTP still valid for ${recipientEmail}. Reusing code generated ${(Date.now() - existingOtp.createdAt) / 1000}s ago to prevent duplicate email.`);
+      console.log(`[TrustGuard OTP] Active OTP still valid for ${maskEmail(recipientEmail)}. Reusing active code to prevent duplicate dispatch.`);
     } else {
       otpResult = await issueOtpForSession(session, triggerSource);
     }
 
+    // Return success to the frontend ONLY after the backend has successfully submitted the email request
+    if (!otpResult.emailSent && otpResult.emailStatus === "FAILED") {
+      return res.status(502).json({
+        success: false,
+        error: "email_delivery_failed",
+        message: otpResult.error || "Failed to deliver OTP email through configured provider.",
+        emailStatus: otpResult.emailStatus,
+        deliveryError: otpResult.error,
+        role: session.role,
+        roleThreshold
+      });
+    }
+
+    // Never return the OTP code in the API response
     res.json({ 
       success: true,
-      userEmail: session.userEmail || user?.email || recipientEmail,
-      targetRecipient: recipientEmail,
-      activeOtpCode: otpResult.code,
+      userEmail: session.userEmail || user?.email || maskEmail(recipientEmail),
+      targetRecipient: maskEmail(recipientEmail),
       emailStatus: otpResult.emailStatus,
       deliveryError: otpResult.error,
       role: session.role,
       roleThreshold,
       simulated: otpResult.simulated,
-      message: otpResult.emailStatus === "SENT" 
-        ? `Real-time OTP generated and successfully delivered to ${recipientEmail} via NodeMailer.` 
-        : `Real-time OTP generated for ${recipientEmail}. Delivery status: ${otpResult.emailStatus}`
+      message: `Step-Up verification OTP has been dispatched to ${maskEmail(recipientEmail)}.`
     });
   });
 
