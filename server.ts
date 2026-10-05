@@ -1546,14 +1546,33 @@ async function startServer() {
     }
 
     const triggerSource = req.body.reason || "Manual Step-Up OTP Verification Request";
-    const otpResult = await issueOtpForSession(session, triggerSource);
+    const forceResend = req.body.forceResend === true || triggerSource.toLowerCase().includes("resend");
     const roleThreshold = getRoleOtpThreshold(session.role);
     const user = users.find(u => u.id === session.userId);
     const recipientEmail = resolveActualRecipient(session.userEmail || user?.email);
 
+    const existingOtp = sessionOtpCodes.get(session.id);
+    const isRecentAndValid = existingOtp && 
+      Date.now() < existingOtp.expiresAt && 
+      existingOtp.emailSent && 
+      (Date.now() - existingOtp.createdAt < 60000);
+
+    let otpResult: { code: string; emailStatus: string; simulated: boolean; error?: string };
+    if (!forceResend && isRecentAndValid && existingOtp) {
+      otpResult = {
+        code: existingOtp.code,
+        emailStatus: existingOtp.emailStatus,
+        simulated: existingOtp.simulated,
+        error: existingOtp.deliveryError
+      };
+      console.log(`[TrustGuard OTP] Active OTP still valid for ${recipientEmail}. Reusing code generated ${(Date.now() - existingOtp.createdAt) / 1000}s ago to prevent duplicate email.`);
+    } else {
+      otpResult = await issueOtpForSession(session, triggerSource);
+    }
+
     res.json({ 
       success: true,
-      userEmail: recipientEmail,
+      userEmail: session.userEmail || user?.email || recipientEmail,
       targetRecipient: recipientEmail,
       activeOtpCode: otpResult.code,
       emailStatus: otpResult.emailStatus,

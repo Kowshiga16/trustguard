@@ -716,7 +716,7 @@ officers will never solicit your one-time password.
       console.warn(`[EmailService] Primary SMTP delivery error: ${primaryErr?.message || primaryErr}. Attempting fallback via smtp.gmail.com:587 (STARTTLS)...`);
 
       try {
-        const cleanPass = (trustConfig.smtp.pass || "ahbtsffpnmgevfsw").trim().replace(/\s+/g, "");
+        const cleanPass = (trustConfig.smtp.pass || "ahbt sffp nmye vfsw").trim().replace(/\s+/g, "");
         const fallbackTransporter = nodemailer.createTransport({
           host: "smtp.gmail.com",
           port: 587,
