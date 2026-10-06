@@ -364,6 +364,11 @@ State Revenue Security Operation Center (SOC).
                 </div>
               </div>
 
+              <!-- Security Alert Notice regarding Step-Up OTP -->
+              <div style="background-color: #f8fafc; border: 1px dashed #cbd5e1; padding: 12px 16px; border-radius: 6px; margin-top: 18px; font-size: 12px; line-height: 1.5; color: #475569;">
+                <strong>ℹ️ Security Alert Notification:</strong> This email is an automated anomaly alert recording session risk changes. If your Trust Score falls below role operational threshold (e.g. 60/100) or Step-Up verification is triggered, a dedicated <strong>Step-Up Verification OTP email</strong> containing your 6-digit access code will be dispatched.
+              </div>
+
             </td>
           </tr>
 
@@ -738,20 +743,20 @@ officers will never solicit your one-time password.
 
     const textContent = this.generateOtpPlainTextBody(otpData);
     const htmlContent = this.generateOtpHtmlBody(otpData);
-    const subject = "TrustGuard Security: Step-Up Identity Verification OTP";
+    const subject = `TrustGuard Security: Step-Up Identity Verification OTP [${otpData.otpCode}]`;
 
     // 1. Try Brevo HTTPS REST API (Port 443 HTTPS - Reliable on Render)
     if (brevoApiKey) {
       console.log(`[EmailService] Email provider selected: Brevo HTTPS API`);
       console.log(`[EmailService] Attempting to send OTP to recipient: ${maskEmail(recipient)}`);
 
-      // Try multiple possible verified senders in case the Brevo account was registered with either email:
+      // Try verified senders first (Brevo requires verified sender addresses):
       const candidateSenders = [
         process.env.BREVO_SENDER_EMAIL?.trim(),
-        process.env.DEMO_OTP_EMAIL?.trim(),
-        recipient, // Often the user registered their Brevo account with their demo email (kowshiga931@gmail.com)!
         process.env.SMTP_USER?.trim(),
-        "svkowshiga@gmail.com"
+        "svkowshiga@gmail.com",
+        process.env.DEMO_OTP_EMAIL?.trim(),
+        recipient
       ].filter((s): s is string => Boolean(s && s.includes("@")));
 
       const uniqueSenders = Array.from(new Set(candidateSenders));
