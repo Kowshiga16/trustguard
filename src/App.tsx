@@ -41,6 +41,7 @@ import StatsDashboard from "./components/StatsDashboard";
 import OtpVerificationModal from "./components/OtpVerificationModal";
 import CitizenDashboard from "./components/CitizenDashboard";
 import AdminDashboard from "./components/AdminDashboard";
+import { resolveApiUrl } from "./apiConfig";
 
 export default function App() {
   const [users, setUsers] = useState<User[]>([]);
@@ -80,10 +81,12 @@ export default function App() {
     registeredDevice: ""
   });
 
-  // Helper for safe JSON fetching
+  // Helper for safe JSON fetching (centralized API routing)
   async function safeFetchJson<T = any>(url: string, options?: RequestInit): Promise<{ ok: boolean; status: number; data?: T; message?: string }> {
     try {
-      const res = await fetch(url, options);
+      const requestUrl = resolveApiUrl(url);
+
+      const res = await fetch(requestUrl, options);
       const contentType = res.headers.get("content-type") || "";
       let data: any = undefined;
       let message = "";
@@ -1145,10 +1148,10 @@ export default function App() {
                                 const promptScore = prompt("Enter emergency trust score (0 - 100):", "90");
                                 if (promptScore) {
                                   // Get active sessions from backend first
-                                  const sRes = await fetch("/api/admin/sessions", {
+                                  const sRes = await safeFetchJson<any[]>("/api/admin/sessions", {
                                     headers: { "Authorization": session.id }
                                   });
-                                  const sData = await sRes.json();
+                                  const sData = Array.isArray(sRes.data) ? sRes.data : [];
                                   const target = sData.find((s: any) => s.userId !== session.userId);
                                   if (target) {
                                     await handleAdminOverride(target.id, parseInt(promptScore));

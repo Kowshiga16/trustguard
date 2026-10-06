@@ -1924,7 +1924,7 @@ async function startServer() {
       }
     }
 
-    const smtpConfigured = emailService.isConfigured;
+    const smtpConfigured = (emailService as any).isConfigured;
 
     res.json({
       environment: process.env.NODE_ENV || "development",
