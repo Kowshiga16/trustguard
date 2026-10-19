@@ -201,7 +201,7 @@ export default function ThreatSimulator({
               </span>
             </div>
             <p className="text-[11px] text-slate-400 mt-1 leading-normal mb-3">
-              Simulate low trust score for <b className="text-indigo-300">{session.role}</b> dropping below {roleThreshold}. Automatically triggers <b>NodeMailer OTP generation</b> & delivery to <b className="text-slate-300">{session.userEmail}</b>.
+              Simulate low trust score for <b className="text-indigo-300">{session.role}</b> dropping below {roleThreshold}. Automatically triggers <b>Step-Up OTP generation</b> & delivery to your registered email.
             </p>
             <button
               onClick={async () => {

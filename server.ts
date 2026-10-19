@@ -1352,7 +1352,18 @@ async function startServer() {
       return res.status(404).json({ error: "not-found", message: "User not found" });
     }
 
-    sessions = sessions.filter(s => s.userId !== user.id);
+    // Zero Trust Concurrent Login Detection:
+    // Check if an active session already exists for this same User ID
+    const existingActiveSession = sessions.find(s => 
+      s.userId === user.id && 
+      s.status !== "Expired"
+    );
+    const isConcurrentLogin = Boolean(existingActiveSession);
+
+    // If not a concurrent login, clean up stale/terminated sessions for this user ID
+    if (!isConcurrentLogin) {
+      sessions = sessions.filter(s => s.userId !== user.id);
+    }
 
     const clientIp = extractClientIp(req);
     const clientUa = extractClientUserAgent(req);
@@ -1371,6 +1382,11 @@ async function startServer() {
       village: user.assignedJurisdiction?.villageId
     }, JWT_SECRET, { expiresIn: JWT_TTL as any });
 
+    const roleThreshold = getRoleOtpThreshold(user.roleName);
+
+    // If concurrent active login detected for the same ID, degrade trust score below role threshold to trigger Step-Up OTP
+    const initialTrustScore = isConcurrentLogin ? Math.min(50, roleThreshold - 10) : 100;
+
     const newSession: ActiveSession = {
       id: `sess_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       userId: user.id,
@@ -1381,7 +1397,7 @@ async function startServer() {
       ipAddress: initialIp,
       loginTime: new Date().toISOString(),
       lastActivityTime: new Date().toISOString(),
-      currentTrustScore: 100,
+      currentTrustScore: initialTrustScore,
       status: "Active",
       token: jwtToken,
       simulatedDeviceMismatch: isDeviceMismatch,
@@ -1392,45 +1408,85 @@ async function startServer() {
       simulatedIdleTriggered: false,
       failedActionCount: 0,
       otpVerified: false,
+      requiresOtp: isConcurrentLogin,
+      roleThreshold,
       realLoginIp: initialIp,
       initialAuthenticatedIp: initialIp,
       currentRequestIp: clientIp,
       realLoginUserAgent: customDevice || clientUa
     };
 
-    const initialEval = await trustEngine.evaluateSessionTrust(
-      newSession, 
-      isDeviceMismatch ? "Login via Untrusted Device" : "Login via Registered Device", 
-      user, 
-      "/api/auth/login"
-    );
+    if (isConcurrentLogin) {
+      console.log(`[TrustGuard PEP] Simultaneous active login detected for User ID ${user.id} (${user.name}). Generating Step-Up OTP challenge.`);
+      await issueOtpForSession(
+        newSession,
+        `Concurrent Session Anomaly: User ID ${user.id} (${user.name}) logged in simultaneously from multiple sessions`
+      );
 
-    if (newSession.currentTrustScore < trustConfig.thresholds.criticalMax) {
-      newSession.status = "Blocked";
+      if (existingActiveSession) {
+        existingActiveSession.requiresOtp = true;
+        existingActiveSession.currentTrustScore = Math.min(existingActiveSession.currentTrustScore, roleThreshold - 10);
+        void issueOtpForSession(
+          existingActiveSession,
+          `Concurrent Session Anomaly: User ID ${user.id} logged in simultaneously from another client`
+        );
+      }
+
+      const audit: AuditLog = {
+        id: `al_${Date.now()}`,
+        userId: user.id,
+        userName: user.name,
+        role: user.roleName,
+        actionPerformed: "CONCURRENT_LOGIN_DETECTED",
+        resourceAccessed: "AUTH_GATEWAY",
+        trustScoreAtAction: newSession.currentTrustScore,
+        decision: "STEP-UP OTP",
+        timestamp: new Date().toISOString(),
+        ipAddress: newSession.ipAddress,
+        device: newSession.deviceFingerprint,
+        riskLevel: "HIGH",
+        reasons: [
+          `Simultaneous active session detected for User ID ${user.id} (${user.name})`,
+          "Concurrent login from multiple endpoints. Step-Up OTP challenge triggered."
+        ],
+        policyAction: "Dual session detected. Trust score degraded below role threshold and Step-Up OTP dispatched."
+      };
+      recordAuditLog(audit);
+    } else {
+      const initialEval = await trustEngine.evaluateSessionTrust(
+        newSession, 
+        isDeviceMismatch ? "Login via Untrusted Device" : "Login via Registered Device", 
+        user, 
+        "/api/auth/login"
+      );
+
+      if (newSession.currentTrustScore < trustConfig.thresholds.criticalMax) {
+        newSession.status = "Blocked";
+      }
+
+      if (initialEval.trustLog) recordTrustLog(initialEval.trustLog);
+      if (initialEval.auditEntry) recordAuditLog(initialEval.auditEntry);
+      if (initialEval.securityAlert) recordSecurityAlert(initialEval.securityAlert);
+
+      const audit: AuditLog = {
+        id: `al_${Date.now()}`,
+        userId: user.id,
+        userName: user.name,
+        role: user.roleName,
+        actionPerformed: "USER_LOGIN",
+        resourceAccessed: "AUTH_GATEWAY",
+        trustScoreAtAction: newSession.currentTrustScore,
+        decision: newSession.status === "Blocked" ? "TERMINATED" : "ALLOWED",
+        timestamp: new Date().toISOString(),
+        ipAddress: newSession.ipAddress,
+        device: newSession.deviceFingerprint,
+        riskLevel: initialEval.riskLevel,
+        policyAction: initialEval.policyDecision
+      };
+      recordAuditLog(audit);
     }
 
     sessions.push(newSession);
-
-    if (initialEval.trustLog) recordTrustLog(initialEval.trustLog);
-    if (initialEval.auditEntry) recordAuditLog(initialEval.auditEntry);
-    if (initialEval.securityAlert) recordSecurityAlert(initialEval.securityAlert);
-
-    const audit: AuditLog = {
-      id: `al_${Date.now()}`,
-      userId: user.id,
-      userName: user.name,
-      role: user.roleName,
-      actionPerformed: "USER_LOGIN",
-      resourceAccessed: "AUTH_GATEWAY",
-      trustScoreAtAction: newSession.currentTrustScore,
-      decision: newSession.status === "Blocked" ? "TERMINATED" : "ALLOWED",
-      timestamp: new Date().toISOString(),
-      ipAddress: newSession.ipAddress,
-      device: newSession.deviceFingerprint,
-      riskLevel: initialEval.riskLevel,
-      policyAction: initialEval.policyDecision
-    };
-    recordAuditLog(audit);
 
     res.json({ session: newSession, user, token: jwtToken });
   });
@@ -1704,7 +1760,7 @@ async function startServer() {
       role: session.role,
       roleThreshold,
       simulated: otpResult.simulated,
-      message: `Step-Up verification OTP has been dispatched to ${maskEmail(recipientEmail)}.`
+      message: "Step-Up verification OTP has been dispatched to your registered email address."
     });
   });
 
