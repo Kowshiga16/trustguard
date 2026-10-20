@@ -34,9 +34,9 @@ export interface TrustThresholds {
 
 export interface RiskDeductionsConfig {
   newDevice: number;              // default: 20
-  differentIp: number;            // default: 15
+  differentIp: number;            // default: 20
   aiAnomaly: number;              // default: 25 (scaled by Isolation Forest NAS)
-  rateLimitViolation: number;     // default: 15
+  rateLimitViolation: number;     // default: 20
   offHoursAccess: number;         // default: 10
   outsideJurisdiction: number;    // default: 20
   failedOperation: number;        // default: 10 per attempt
@@ -87,9 +87,9 @@ export const trustConfig = {
   // 2. Centralized Explainable Risk Deductions
   deductions: {
     newDevice: parseInt(process.env.PENALTY_NEW_DEVICE || "20", 10),
-    differentIp: parseInt(process.env.PENALTY_DIFFERENT_IP || "15", 10),
+    differentIp: parseInt(process.env.PENALTY_DIFFERENT_IP || "20", 10),
     aiAnomaly: parseInt(process.env.PENALTY_AI_ANOMALY || "25", 10),
-    rateLimitViolation: parseInt(process.env.PENALTY_RATE_LIMIT || "15", 10),
+    rateLimitViolation: parseInt(process.env.PENALTY_RATE_LIMIT || "20", 10),
     offHoursAccess: parseInt(process.env.PENALTY_OFF_HOURS || "10", 10),
     outsideJurisdiction: parseInt(process.env.PENALTY_JURISDICTION || "20", 10),
     failedOperation: parseInt(process.env.PENALTY_FAILED_OP || "10", 10),

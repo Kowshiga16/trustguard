@@ -59,7 +59,7 @@ test("1. Criterion 1: Device Mismatch / Hardware Drift triggers -20 pts deductio
   assert.strictEqual(driftResult.finalTrustScore, baselineTrust - 20, "Trust score must drop by exactly 20 points");
 });
 
-test("2. Criterion 2: IP Address / Route Shift triggers -15 pts deduction in real time", async () => {
+test("2. Criterion 2: IP Address / Route Shift triggers -20 pts deduction in real time", async () => {
   const session = createBaselineSession("officer_1", RoleName.VillageAdministrativeOfficer);
   const initialResult = await hybridTrustService.calculateHybridTrust(session);
   const baselineTrust = initialResult.finalTrustScore;
@@ -71,8 +71,8 @@ test("2. Criterion 2: IP Address / Route Shift triggers -15 pts deduction in rea
   }
 
   const routeResult = await hybridTrustService.calculateHybridTrust(session);
-  assert.strictEqual(routeResult.riskFactors?.["Different IP / Network Route Drift"], 15, "Deduction for IP shift must be 15 pts");
-  assert.strictEqual(routeResult.finalTrustScore, baselineTrust - 15, "Trust score must drop by exactly 15 points");
+  assert.strictEqual(routeResult.riskFactors?.["Different IP / Network Route Drift"], 20, "Deduction for IP shift must be 20 pts");
+  assert.strictEqual(routeResult.finalTrustScore, baselineTrust - 20, "Trust score must drop by exactly 20 points");
 });
 
 test("3. Criterion 3: Cross-Jurisdiction Access triggers -20 pts deduction in real time", async () => {
@@ -103,7 +103,7 @@ test("4. Criterion 4: Off-Hours Access triggers -10 pts deduction in real time",
   assert.strictEqual(offHoursResult.finalTrustScore, 90, "Trust score must be 90 during off-hours");
 });
 
-test("5. Criterion 5: Velocity / Rate Limit Violation triggers -15 pts + ML Anomaly deduction", async () => {
+test("5. Criterion 5: Velocity / Rate Limit Violation triggers -20 pts + ML Anomaly deduction", async () => {
   const session = createBaselineSession("citizen_1", RoleName.Citizen);
   
   // Citizen role allows max 3 views per minute. Rapidly view 5 documents
@@ -120,9 +120,9 @@ test("5. Criterion 5: Velocity / Rate Limit Violation triggers -15 pts + ML Anom
   session.simulatedSpamTriggered = true;
   const velocityResult = await hybridTrustService.calculateHybridTrust(session);
 
-  assert.strictEqual(velocityResult.riskFactors?.["Document Request Velocity Violation"], 15, "Velocity deduction must be 15 pts");
+  assert.strictEqual(velocityResult.riskFactors?.["Document Request Velocity Violation"], 20, "Velocity deduction must be 20 pts");
   assert.ok(velocityResult.mlRisk >= 10, "Isolation forest ML model must apply anomaly penalty for rapid requests");
-  assert.ok(velocityResult.finalTrustScore <= 75, `Trust score should drop to <= 75, got ${velocityResult.finalTrustScore}`);
+  assert.ok(velocityResult.finalTrustScore <= 70, `Trust score should drop to <= 70, got ${velocityResult.finalTrustScore}`);
 });
 
 test("6. Criterion 6: Failed Operations Count triggers -10 pts per attempt in real time", async () => {
@@ -154,7 +154,7 @@ test("7. Criterion 7: Identity Step-Up Recovery restores posture with +20 pts bo
   const degraded = await hybridTrustService.calculateHybridTrust(session);
   assert.strictEqual(degraded.finalTrustScore, 60, "Degraded trust score should be 60");
 
-  // User submits valid OTP code sent to kowshiga931@gmail.com
+  // User submits valid OTP code sent to registered user email
   session.otpVerified = true;
   session.simulatedDeviceMismatch = false;
   session.simulatedOutsideJurisdiction = false;
@@ -163,4 +163,21 @@ test("7. Criterion 7: Identity Step-Up Recovery restores posture with +20 pts bo
   const restored = await hybridTrustService.calculateHybridTrust(session);
   assert.ok(restored.finalTrustScore >= 80, `Restored score must be at least 80 (Full Access), got ${restored.finalTrustScore}`);
   assert.strictEqual(restored.isAnomaly, false, "Session posture must be restored to normal");
+});
+
+test("8. Threat Simulator: All 6 simulation factors sum to exactly 100 points deduction", async () => {
+  const session = createBaselineSession("officer_1", RoleName.VillageAdministrativeOfficer);
+  session.simulatedDeviceMismatch = true;      // -20
+  session.simulatedIpMismatch = true;          // -20
+  session.simulatedNightAccess = true;         // -10
+  session.simulatedOutsideJurisdiction = true; // -20
+  session.simulatedSpamTriggered = true;       // -20
+  session.simulatedIdleTriggered = true;       // -10
+
+  const ruleEval = trustEngine.evaluateRuleDeductions(session);
+  assert.strictEqual(ruleEval.totalDeductions, 100, "All 6 simulation factors must sum to exactly 100 pts");
+  const ruleScore = trustEngine.calculateRuleBasedScore(session);
+  assert.strictEqual(ruleScore, 0, "Activating all threats must drop rule-based trust score to 0");
+  const hybridResult = await hybridTrustService.calculateHybridTrust(session);
+  assert.strictEqual(hybridResult.finalTrustScore, 0, "Activating all threats must drop final trust score to 0");
 });

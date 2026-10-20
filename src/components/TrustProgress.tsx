@@ -167,7 +167,7 @@ export default function TrustProgress({ session, onSessionUpdate }: TrustProgres
                 ? "bg-rose-500/20 text-rose-300 border border-rose-500/40" 
                 : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
             }`}>
-              {session.simulatedIpMismatch ? "Route Shift: -15 pts" : "Verified: Match (0 pts)"}
+              {session.simulatedIpMismatch ? "Route Shift: -20 pts" : "Verified: Match (0 pts)"}
             </span>
           </div>
 
@@ -210,7 +210,7 @@ export default function TrustProgress({ session, onSessionUpdate }: TrustProgres
                   : "bg-rose-950/60 text-rose-300 border border-rose-700/50 hover:bg-rose-900"
               }`}
             >
-              {session.simulatedIpMismatch ? "↺ Restore Original IP Route" : "⚡ Test IP Route Shift (-15 pts)"}
+              {session.simulatedIpMismatch ? "↺ Restore Original IP Route" : "⚡ Test IP Route Shift (-20 pts)"}
             </button>
           </div>
         </div>

@@ -161,12 +161,12 @@ test('5. Dynamic Trust Engine Rule Scoring & ML Blending', async () => {
   const baseScore = trustEngine.calculateRuleBasedScore(session);
   assert.equal(baseScore, 100, "Base score without threat flags should be 100");
 
-  // Threat toggled: device mismatch (-20) and IP mismatch (-15)
+  // Threat toggled: device mismatch (-20) and IP mismatch (-20)
   session.simulatedDeviceMismatch = true;
   session.simulatedIpMismatch = true;
 
   const degradedScore = trustEngine.calculateRuleBasedScore(session);
-  assert.equal(degradedScore, 65, "100 - 20 - 15 = 65");
+  assert.equal(degradedScore, 60, "100 - 20 - 20 = 60");
 
   // Full session evaluation pipeline combining rule score (65) and ML anomaly penalty
   const evalResult = await trustEngine.evaluateSessionTrust(session, "Threat Simulation", undefined, "/api/test");

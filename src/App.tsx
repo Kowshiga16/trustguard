@@ -897,11 +897,13 @@ export default function App() {
 
             <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 text-left w-full space-y-1.5 text-[10px]">
               <span className="block font-bold text-slate-500 uppercase tracking-widest text-[9px] mb-2">Context Threat Factors:</span>
-              {session.simulatedDeviceMismatch && <div className="text-rose-400 font-bold">• High Risk Device Fingerprint Mismatch (-25)</div>}
+              {session.simulatedDeviceMismatch && <div className="text-rose-400 font-bold">• High Risk Device Fingerprint Mismatch (-20)</div>}
               {session.simulatedIpMismatch && <div className="text-rose-400 font-bold">• Mid-Session IP Address Shift (-20)</div>}
               {session.simulatedNightAccess && <div className="text-rose-400 font-bold">• Off-Hours Registry Access Violation (-10)</div>}
               {session.simulatedOutsideJurisdiction && <div className="text-rose-400 font-bold">• Out-Of-Jurisdiction Territory Query (-20)</div>}
-              {session.failedActionCount > 0 && <div className="text-rose-400 font-bold">• Repeated Unauthorized Write Actions Penalty</div>}
+              {session.simulatedSpamTriggered && <div className="text-rose-400 font-bold">• Rapid Request Spike Attack (-20)</div>}
+              {session.simulatedIdleTriggered && <div className="text-rose-400 font-bold">• Post-Idle Burst Anomaly (-10)</div>}
+              {session.failedActionCount > 0 && <div className="text-rose-400 font-bold">• Repeated Unauthorized Write Actions Penalty (-{session.failedActionCount * 10})</div>}
             </div>
 
             <div className="pt-2 w-full flex gap-3 font-sans text-xs font-bold">
@@ -956,7 +958,7 @@ export default function App() {
                     <span>⚠ Security Alert: Network / IP Change Detected</span>
                   </h4>
                   <span className="text-[10px] font-mono bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded font-extrabold border border-amber-300">
-                    -15 pts
+                    -20 pts
                   </span>
                 </div>
                 <p className="text-xs text-amber-800 mt-1">

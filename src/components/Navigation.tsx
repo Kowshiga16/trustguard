@@ -69,7 +69,7 @@ export default function Navigation({
               </div>
               <div className="text-[9px] text-slate-400 font-sans">
                 {session.simulatedIpMismatch ? (
-                  <span className="text-rose-600 font-bold">Route Shift (-15 pts)</span>
+                  <span className="text-rose-600 font-bold">Route Shift (-20 pts)</span>
                 ) : (
                   <span className="text-emerald-700 font-semibold">Route Verified</span>
                 )}

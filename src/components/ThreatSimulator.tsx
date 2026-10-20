@@ -50,7 +50,7 @@ export default function ThreatSimulator({
       id: "simulatedIpMismatch",
       name: "Mid-Session IP Route Drift",
       desc: "User shifts networks mid-session or hops onto a proxy/VPN.",
-      penalty: -15,
+      penalty: -20,
       icon: Wifi,
       active: session.simulatedIpMismatch
     },
@@ -165,7 +165,7 @@ export default function ThreatSimulator({
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-200">Rapid Request Spike Attack</span>
               <span className="text-[9px] font-extrabold text-rose-400 tracking-wider uppercase bg-rose-500/10 px-1.5 py-0.5 rounded">
-                -15
+                -20
               </span>
             </div>
             <p className="text-[11px] text-slate-400 mt-1 leading-normal mb-3">
@@ -234,7 +234,7 @@ export default function ThreatSimulator({
 
       <div className="mt-5 border-t border-slate-800 pt-4 text-[10px] text-slate-400 flex items-center gap-2">
         <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-        <span>Tip: Try activating multiple threats to drop the trust score below 25!</span>
+        <span>Tip: Activating all threats drops the trust score to 0! All 6 factors sum to exactly 100 pts.</span>
       </div>
     </div>
   );
