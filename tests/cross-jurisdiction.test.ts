@@ -43,20 +43,7 @@ function createSession(user: User, initialScore: number = 90): ActiveSession {
 }
 
 // Locate key actors and records
-const vaoAnitha: User = {
-  id: "u_vao_anitha",
-  name: "Anitha Sundaram (VAO)",
-  email: "anitha.vao@revenue.tn.gov.in",
-  roleName: RoleName.VillageAdministrativeOfficer,
-  phone: "9840344556",
-  assignedJurisdiction: {
-    district: "Kancheepuram",
-    taluk: "Tambaram",
-    villageId: "v1" // Mudichur
-  },
-  registeredDevice: "VAO-Terminal-01",
-  status: "Active"
-};
+const vaoAnitha = DEFAULT_USERS.find(u => u.email === "anitha.vao@revenue.tn.gov.in")!;
 const riOfficer = DEFAULT_USERS.find(u => u.roleName === RoleName.RevenueInspector)!;
 const citizenRamesh = DEFAULT_USERS.find(u => u.roleName === RoleName.Citizen)!;
 const adminShrinivas = DEFAULT_USERS.find(u => u.roleName === RoleName.SystemAdministrator)!;

@@ -161,6 +161,38 @@ export const DEFAULT_USERS: User[] = [
     status: "Active"
   },
   {
+    id: "u_vao_anitha",
+    name: "Anitha Sundaram (VAO)",
+    email: "anitha.vao@revenue.tn.gov.in",
+    passwordHash: DEFAULT_PASSWORD_HASH,
+    roleName: RoleName.VillageAdministrativeOfficer,
+    phone: "9840344556",
+    assignedJurisdiction: {
+      district: "Kancheepuram",
+      taluk: "Tambaram",
+      villageId: "v1"
+    },
+    registeredDevice: "VAO-Terminal-01",
+    properties: [],
+    status: "Active"
+  },
+  {
+    id: "u_deo_anitha",
+    name: "Anitha Sundaram (DEO)",
+    email: "anitha.deo@revenue.tn.gov.in",
+    passwordHash: DEFAULT_PASSWORD_HASH,
+    roleName: RoleName.DataEntryOperator,
+    phone: "9840344557",
+    assignedJurisdiction: {
+      district: "Kancheepuram",
+      taluk: "Tambaram",
+      villageId: "v1"
+    },
+    registeredDevice: "DEO-Desktop-02",
+    properties: [],
+    status: "Active"
+  },
+  {
     id: "u_vao_001",
     name: "Balaji Rajan",
     email: "balaji.vao@revenue.tn.gov.in",
