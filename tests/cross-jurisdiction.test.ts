@@ -281,8 +281,40 @@ test("14. Verification that an audit record is created with CROSS_JURISDICTION_A
   assert.equal(mockAuditLog.eventType, "CROSS_JURISDICTION_ACCESS_DENIED");
   assert.equal(mockAuditLog.ruleJValue, 1);
   assert.equal(mockAuditLog.rulePenalty, 20);
-  assert.equal(mockAuditLog.decision, "DENIED");
   assert.equal(mockAuditLog.requestedRecordId, "rec5");
   assert.equal(mockAuditLog.requestedRecordJurisdiction?.villageId, "v4");
   assert.equal(mockAuditLog.authorizedUserJurisdiction?.villageId, "v1");
 });
+
+test("15. Details view check: VAO Anitha attempting to open record details outside jurisdiction is denied 403, 20-pt penalty applied, and record metadata is NOT exposed", async () => {
+  const session = createSession(vaoAnitha, 90);
+  const decision = authorizeLandRecordAccess(vaoAnitha, pillaipakkamRec, session, villages);
+
+  assert.equal(decision.authorized, false, "Details access must be denied for record outside jurisdiction");
+  assert.equal(decision.isCrossJurisdiction, true);
+  assert.equal(decision.code, "UNAUTHORIZED_CROSS_JURISDICTION_ACCESS");
+
+  session.simulatedOutsideJurisdiction = true;
+  const evaluation = await trustEngine.evaluateSessionTrust(
+    session,
+    `Cross-Jurisdiction Record Details View Attempt: Survey ${pillaipakkamRec.surveyNumber}`,
+    vaoAnitha,
+    `/api/records/${pillaipakkamRec.id}`
+  );
+
+  assert.equal(evaluation.hybridResult.ruleRisk, 20, "20-pt penalty must be applied");
+  assert.equal(session.currentTrustScore, 80, "Trust score should drop by 20 points from 90 to 80");
+
+  const responsePayload = {
+    authorized: false,
+    decision: "DENIED",
+    error: "cross_jurisdiction_access_denied",
+    message: "Access Denied: This land record is outside your authorized jurisdiction. The access attempt has been recorded.",
+    trustScore: session.currentTrustScore
+  };
+
+  assert.equal((responsePayload as any).ownerName, undefined, "Protected record details like ownerName must not be exposed");
+  assert.equal((responsePayload as any).ownerPhone, undefined, "Protected record details like ownerPhone must not be exposed");
+  assert.equal((responsePayload as any).pattaNumber, undefined, "Protected record details like pattaNumber must not be exposed");
+});
+

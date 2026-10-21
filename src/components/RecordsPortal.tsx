@@ -58,6 +58,7 @@ export default function RecordsPortal({
   // Record Details Modal state
   const [showRecordDetailsModal, setShowRecordDetailsModal] = useState(false);
   const [selectedDetailRecord, setSelectedDetailRecord] = useState<LandRecord | null>(null);
+  const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null);
 
   // Form states for adding/editing record
   const [surveyNum, setSurveyNum] = useState("");
@@ -293,9 +294,46 @@ export default function RecordsPortal({
     }
   };
 
-  const handleOpenDetails = (rec: LandRecord) => {
-    setSelectedDetailRecord(rec);
-    setShowRecordDetailsModal(true);
+  const handleOpenDetails = async (rec: LandRecord) => {
+    if (!session) return;
+    setLoadingDetailId(rec.id);
+    setOtpCode("");
+    setOtpErrorMsg("");
+    setOtpSuccessMsg("");
+
+    try {
+      const res = await fetch(`/api/records/${rec.id}`, {
+        headers: { Authorization: session.id }
+      });
+      const data = await res.json();
+      if (res.ok && !data.error && data.id) {
+        setSelectedDetailRecord(data);
+        setShowRecordDetailsModal(true);
+        setShowDocDenialModal(false);
+        if (data.trustScore !== undefined) {
+          const updatedSession = { ...session, currentTrustScore: data.trustScore };
+          onSessionUpdate?.(updatedSession);
+        }
+      } else {
+        setSelectedDetailRecord(null);
+        setShowRecordDetailsModal(false);
+        setDocDenialReason(data.message || data.error || "Access Denied: This land record is outside your authorized jurisdiction. The access attempt has been recorded.");
+        setDocDenialDecision(data.decision || "DENIED");
+        setShowDocDenialModal(true);
+        if (data.trustScore !== undefined) {
+          const updatedSession = { ...session, currentTrustScore: data.trustScore };
+          onSessionUpdate?.(updatedSession);
+        }
+      }
+    } catch (err: any) {
+      setSelectedDetailRecord(null);
+      setShowRecordDetailsModal(false);
+      setDocDenialReason(err.message || "Failed to contact authorization server");
+      setDocDenialDecision("ERROR");
+      setShowDocDenialModal(true);
+    } finally {
+      setLoadingDetailId(null);
+    }
   };
 
   const handleAddSubmit = async (e: React.FormEvent) => {
@@ -609,11 +647,12 @@ export default function RecordsPortal({
                     {/* Details modal button */}
                     <button
                       onClick={() => handleOpenDetails(rec)}
-                      className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg transition-all cursor-pointer bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-250"
-                      title="View Full Metadata & Audit Information"
+                      disabled={loadingDetailId === rec.id}
+                      className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg transition-all cursor-pointer bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-250 disabled:opacity-50"
+                      title="View Full Metadata & Audit Information (Zero Trust Protected)"
                     >
                       <Eye className="w-3 h-3 text-slate-500" />
-                      Details
+                      {loadingDetailId === rec.id ? "Checking..." : "Details"}
                     </button>
 
                     {/* Mutation Submit (Citizen or DEO) */}
@@ -1179,7 +1218,7 @@ export default function RecordsPortal({
               Access Decision: {docDenialDecision}
             </div>
             <h3 className="text-base font-bold text-slate-900 tracking-tight mb-2">
-              Document Access Restricted
+              {docDenialReason.toLowerCase().includes("jurisdiction") ? "Access Denied" : "Document Access Restricted"}
             </h3>
             <p className="text-xs text-slate-600 font-medium leading-relaxed mb-4 bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-left">
               {docDenialReason}

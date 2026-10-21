@@ -2197,22 +2197,37 @@ async function startServer() {
       return res.status(404).json({ error: "not_found", message: "Land record not found" });
     }
 
-    if (user) {
-      const decision = authorizeLandRecordAccess(user, record, session, villages);
-      if (!decision.authorized) {
-        if (decision.isCrossJurisdiction) {
-          session.simulatedOutsideJurisdiction = true;
-          sessionActivityTracker.recordFailedOperation(session.id);
-          const evaluation = await trustEngine.evaluateSessionTrust(
-            session,
-            `Cross-Jurisdiction Record Details View Attempt: Survey ${record.surveyNumber}`,
-            user,
-            req.path
-          );
-          const hr = evaluation.hybridResult;
-          const observedIp = extractClientIp(req);
+    if (!user) {
+      return res.status(401).json({ authorized: false, error: "unauthorized", message: "User account not recognized." });
+    }
 
-          const deniedAudit: AuditLog = {
+    const decision = authorizeLandRecordAccess(user, record, session, villages);
+    if (!decision.authorized) {
+      if (decision.isCrossJurisdiction) {
+        session.simulatedOutsideJurisdiction = true;
+        sessionActivityTracker.recordFailedOperation(session.id);
+        const evaluation = await trustEngine.evaluateSessionTrust(
+          session,
+          `Cross-Jurisdiction Record Details View Attempt: Survey ${record.surveyNumber}`,
+          user,
+          req.path
+        );
+        const hr = evaluation.hybridResult;
+        const observedIp = extractClientIp(req);
+
+        // Step-Up OTP challenge if trust score dropped below role threshold
+        const roleThreshold = getRoleOtpThreshold(session.role);
+        if (session.currentTrustScore <= roleThreshold && !session.otpVerified) {
+          const activeOtp = sessionOtpCodes.get(session.id);
+          if (!activeOtp || Date.now() >= activeOtp.expiresAt) {
+            void issueOtpForSession(
+              session,
+              `Cross-Jurisdiction Step-Up: Score (${session.currentTrustScore}) dropped below role threshold (${roleThreshold})`
+            );
+          }
+        }
+
+        const deniedAudit: AuditLog = {
             id: `al_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
             userId: session.userId,
             userName: session.userName,
@@ -2262,7 +2277,6 @@ async function startServer() {
           trustScore: session.currentTrustScore
         });
       }
-    }
 
     res.json(record);
   });
