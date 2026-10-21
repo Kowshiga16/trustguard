@@ -59,6 +59,7 @@ export default function CitizenDashboard({ session, users, villages, records, ap
           onSessionUpdate?.({ ...session, currentTrustScore: data.evaluation.trustScore });
         }
       } else {
+        setViewingDoc(null);
         const penaltyMsg = data.trustScore !== undefined 
           ? `Access Denied by Policy Decision Point: You do not possess ownership authorization for this deed (Owner: ${ownerName}). Failed attempt logged: -10 pts penalty applied. Live Trust Score: ${data.trustScore}/100.`
           : (data.message || "Access Denied by Security Policy");
@@ -76,6 +77,7 @@ export default function CitizenDashboard({ session, users, villages, records, ap
         }
       }
     } catch (err: any) {
+      setViewingDoc(null);
       setSecurityNotice({
         message: err.message || "Communication error with Zero Trust PDP Gateway.",
         type: "error"

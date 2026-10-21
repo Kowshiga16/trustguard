@@ -158,7 +158,9 @@ export default function RecordsPortal({
           onSessionUpdate?.(updatedSession);
         }
       } else {
-        setDocDenialReason(data.message || data.error || "Access Denied by Security Policy");
+        setViewingDocPayload(null);
+        setShowDocViewerModal(false);
+        setDocDenialReason(data.message || data.error || "Access Denied: This land record is outside your authorized jurisdiction. The access attempt has been recorded.");
         setDocDenialDecision(data.decision || "DENIED");
         setShowDocDenialModal(true);
         if (data.trustScore !== undefined) {
@@ -167,7 +169,45 @@ export default function RecordsPortal({
         }
       }
     } catch (err: any) {
+      setViewingDocPayload(null);
+      setShowDocViewerModal(false);
       setDocDenialReason(err.message || "Failed to contact authorization server");
+      setDocDenialDecision("ERROR");
+      setShowDocDenialModal(true);
+    }
+  };
+
+  const handleDownloadDoc = async (recordId: string, docType: string) => {
+    if (!session) return;
+    try {
+      const res = await fetch(`/api/records/${recordId}/download/${docType}`, {
+        headers: { Authorization: session.id }
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${docType}_${recordId}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      } else {
+        const data = await res.json();
+        setViewingDocPayload(null);
+        setShowDocViewerModal(false);
+        setDocDenialReason(data.message || data.error || "Access Denied: This land record is outside your authorized jurisdiction. The access attempt has been recorded.");
+        setDocDenialDecision(data.decision || "DENIED");
+        setShowDocDenialModal(true);
+        if (data.trustScore !== undefined) {
+          onSessionUpdate?.({ ...session, currentTrustScore: data.trustScore });
+        }
+      }
+    } catch (err: any) {
+      setViewingDocPayload(null);
+      setShowDocViewerModal(false);
+      setDocDenialReason(err.message || "Failed to download document");
       setDocDenialDecision("ERROR");
       setShowDocDenialModal(true);
     }
@@ -676,14 +716,14 @@ export default function RecordsPortal({
                           <div className="flex items-center justify-between gap-4">
                             <span className="font-bold text-slate-500">Patta</span>
                             {rec.pattaDocumentPath ? (
-                              <a
-                                href={rec.pattaDocumentPath}
-                                download
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadDoc(rec.id, "patta")}
                                 className="font-mono text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded px-2 py-1 text-[10px] font-bold cursor-pointer"
                                 title={rec.pattaNumber || "Patta document"}
                               >
                                 {rec.pattaNumber || "Download Patta"}
-                              </a>
+                              </button>
                             ) : (
                               <span className="font-mono text-slate-500">Not attached</span>
                             )}
@@ -692,14 +732,14 @@ export default function RecordsPortal({
                           <div className="flex items-center justify-between gap-4">
                             <span className="font-bold text-slate-500">Chitta</span>
                             {rec.chittaDocumentPath ? (
-                              <a
-                                href={rec.chittaDocumentPath}
-                                download
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadDoc(rec.id, "chitta")}
                                 className="font-mono text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded px-2 py-1 text-[10px] font-bold cursor-pointer"
                                 title={rec.chittaNumber || "Chitta document"}
                               >
                                 {rec.chittaNumber || "Download Chitta"}
-                              </a>
+                              </button>
                             ) : (
                               <span className="font-mono text-slate-500">Not attached</span>
                             )}
@@ -708,14 +748,14 @@ export default function RecordsPortal({
                           <div className="flex items-center justify-between gap-4">
                             <span className="font-bold text-slate-500">FMB Copy</span>
                             {rec.fmbCopyPath ? (
-                              <a
-                                href={rec.fmbCopyPath}
-                                download
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadDoc(rec.id, "fmb")}
                                 className="font-mono text-indigo-700 underline bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 rounded px-2 py-1 text-[10px] font-bold cursor-pointer"
                                 title={rec.fmbCopyPath || "FMB copy not attached"}
                               >
                                 Download FMB
-                              </a>
+                              </button>
                             ) : (
                               <span className="font-mono text-slate-500">Not attached</span>
                             )}

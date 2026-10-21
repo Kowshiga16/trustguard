@@ -243,6 +243,46 @@ export interface AuditLog {
     sentAt?: string;
   };
   policyAction?: string;
+  eventType?: string;
+  requestedRecordId?: string;
+  requestedRecordJurisdiction?: {
+    district?: string;
+    taluk?: string;
+    villageId?: string;
+    villageName?: string;
+  };
+  authorizedUserJurisdiction?: {
+    district?: string;
+    taluk?: string;
+    villageId?: string;
+  };
+  ruleJValue?: number;
+  rulePenalty?: number;
+  sessionId?: string;
+}
+
+export interface LandRecordAccessDecision {
+  authorized: boolean;
+  decision: "ALLOWED" | "DENIED";
+  reason?: string;
+  code?: 
+    | "UNAUTHORIZED_CROSS_JURISDICTION_ACCESS" 
+    | "UNAUTHORIZED_CITIZEN_ACCESS" 
+    | "SEPARATION_OF_DUTIES" 
+    | "RECORD_NOT_FOUND" 
+    | "UNAUTHORIZED_ROLE";
+  isCrossJurisdiction: boolean;
+  userJurisdiction?: {
+    district?: string;
+    taluk?: string;
+    villageId?: string;
+  };
+  recordJurisdiction?: {
+    district?: string;
+    taluk?: string;
+    villageId?: string;
+    villageName?: string;
+  };
 }
 
 export interface SecurityAlert {

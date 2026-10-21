@@ -34,6 +34,7 @@ import { alertManager } from "./services/alertManager";
 import { emailService, resolveActualRecipient, maskEmail } from "./services/emailService";
 import { sessionActivityTracker } from "./services/sessionActivityTracker";
 import { hybridTrustService } from "./services/hybridTrustService";
+import { authorizeLandRecordAccess } from "./services/authorizationService";
 
 /**
  * Safely extracts real client IP address accounting for reverse proxies (Render, Cloudflare, Nginx, AWS ELB).
@@ -84,7 +85,7 @@ async function initMongo() {
 }
 
 // In-memory Database Arrays
-const villages: Village[] = [
+export const villages: Village[] = [
   { id: "v1", name: "Mudichur", taluk: "Tambaram", district: "Kancheepuram" },
   { id: "v2", name: "Manapakkam", taluk: "Tambaram", district: "Kancheepuram" },
   { id: "v3", name: "Pennalur", taluk: "Sriperumbudur", district: "Kancheepuram" },
@@ -255,9 +256,9 @@ export const DEFAULT_USERS: User[] = [
   }
 ];
 
-let users: User[] = [...DEFAULT_USERS];
+export let users: User[] = [...DEFAULT_USERS];
 
-let landRecords: LandRecord[] = [
+export const DEFAULT_LAND_RECORDS: LandRecord[] = [
   { 
     id: "rec1", 
     surveyNumber: "102/1", 
@@ -416,6 +417,8 @@ let landRecords: LandRecord[] = [
   },
 ];
 
+export let landRecords: LandRecord[] = [...DEFAULT_LAND_RECORDS];
+
 async function seedPropertiesIntoMongoUserCollection() {
   if (!mongoDb) return;
 
@@ -541,9 +544,9 @@ async function loadMutationsFromMongoIntoMemory() {
   }
 }
 
-let sessions: ActiveSession[] = [];
+export let sessions: ActiveSession[] = [];
 let trustLogs: TrustLog[] = [];
-let auditLogs: AuditLog[] = [];
+export let auditLogs: AuditLog[] = [];
 let securityAlerts: SecurityAlert[] = [];
 
 function recordTrustLog(log: TrustLog) {
@@ -723,7 +726,7 @@ function getRequiredRoleForStatus(status: string): RoleName | null {
 }
 
 // Helper functions for logging and trust evaluation
-function getSessionById(id: string): ActiveSession | undefined {
+export function getSessionById(id: string): ActiveSession | undefined {
   return sessions.find(s => s.id === id);
 }
 
@@ -2123,16 +2126,14 @@ async function startServer() {
 
     // Enrich each record with live zero-trust contextual flags
     const enriched = filtered.map(r => {
-      let isCross = false;
-      if (session.role === RoleName.VillageAdministrativeOfficer) {
-        isCross = Boolean(user.assignedJurisdiction?.villageId && r.villageId !== user.assignedJurisdiction.villageId);
-      } else if (session.role === RoleName.RevenueInspector || session.role === RoleName.DeputyTahsildar) {
-        isCross = Boolean(user.assignedJurisdiction?.taluk && r.taluk && r.taluk.toLowerCase() !== user.assignedJurisdiction.taluk.toLowerCase());
-      } else if (session.role === RoleName.Citizen) {
-        isCross = Boolean(user.name && r.ownerName !== user.name);
-      }
+      const decision = authorizeLandRecordAccess(user, r, session, villages);
+      const isCross = decision.isCrossJurisdiction;
       return {
         ...r,
+        pattaDocumentPath: decision.authorized ? r.pattaDocumentPath : undefined,
+        chittaDocumentPath: decision.authorized ? r.chittaDocumentPath : undefined,
+        fmbCopyPath: decision.authorized ? r.fmbCopyPath : undefined,
+        documentPath: decision.authorized ? r.documentPath : undefined,
         isCrossJurisdiction: isCross
       };
     });
@@ -2155,16 +2156,82 @@ async function startServer() {
   });
 
   // Single record detail view endpoint
-  app.get("/api/records/:id", enforceZeroTrust, (req, res) => {
+  app.get("/api/records/:id", enforceZeroTrust, async (req, res) => {
     const session: ActiveSession = (req as any).session;
+    const user = users.find(u => u.id === session.userId);
     const { id } = req.params;
     const record = landRecords.find(r => r.id === id);
     if (!record) {
       return res.status(404).json({ error: "not_found", message: "Land record not found" });
     }
-    if (session.role === RoleName.SystemAdministrator) {
-      return res.status(403).json({ error: "forbidden", message: "Separation of Duties: Admin cannot view record details" });
+
+    if (user) {
+      const decision = authorizeLandRecordAccess(user, record, session, villages);
+      if (!decision.authorized) {
+        if (decision.isCrossJurisdiction) {
+          session.simulatedOutsideJurisdiction = true;
+          sessionActivityTracker.recordFailedOperation(session.id);
+          const evaluation = await trustEngine.evaluateSessionTrust(
+            session,
+            `Cross-Jurisdiction Record Details View Attempt: Survey ${record.surveyNumber}`,
+            user,
+            req.path
+          );
+          const hr = evaluation.hybridResult;
+          const observedIp = extractClientIp(req);
+
+          const deniedAudit: AuditLog = {
+            id: `al_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            userId: session.userId,
+            userName: session.userName,
+            role: session.role,
+            actionPerformed: `VIEW_RECORD_DETAILS_DENIED: Survey ${record.surveyNumber} (Cross-Jurisdiction)`,
+            resourceAccessed: `RECORD_${record.id}`,
+            trustScoreAtAction: session.currentTrustScore,
+            decision: "DENIED",
+            timestamp: new Date().toISOString(),
+            reasons: ["Cross-Jurisdiction Access Denied: Record village is outside authorized administrative scope."],
+            ipAddress: observedIp,
+            device: session.deviceFingerprint,
+            ruleRisk: hr.ruleRisk,
+            mlRisk: hr.mlRisk,
+            isolationForestScore: hr.isolationForestScore,
+            normalizedAnomalyScore: hr.normalizedAnomalyScore,
+            finalTrustScore: hr.finalTrustScore,
+            eventType: "CROSS_JURISDICTION_ACCESS_DENIED",
+            requestedRecordId: record.id,
+            requestedRecordJurisdiction: decision.recordJurisdiction,
+            authorizedUserJurisdiction: decision.userJurisdiction,
+            ruleJValue: 1,
+            rulePenalty: 20,
+            sessionId: session.id
+          };
+          auditLogs.unshift(deniedAudit);
+
+          return res.status(403).json({
+            authorized: false,
+            decision: "DENIED",
+            error: "cross_jurisdiction_access_denied",
+            message: "Access Denied: This land record is outside your authorized jurisdiction. The access attempt has been recorded.",
+            trustScore: session.currentTrustScore,
+            riskLevel: evaluation.riskLevel,
+            policyDecision: evaluation.policyDecision,
+            eventType: "CROSS_JURISDICTION_ACCESS_DENIED",
+            rulePenalty: 20,
+            ruleJValue: 1
+          });
+        }
+
+        return res.status(403).json({
+          authorized: false,
+          decision: "DENIED",
+          error: "forbidden",
+          message: decision.reason || "Access Denied by Security Policy",
+          trustScore: session.currentTrustScore
+        });
+      }
     }
+
     res.json(record);
   });
 
@@ -2180,9 +2247,12 @@ async function startServer() {
       return res.status(404).json({ authorized: false, error: "not_found", message: "Requested land document does not exist." });
     }
 
+    if (!user) {
+      return res.status(401).json({ authorized: false, error: "unauthorized", message: "User account not recognized." });
+    }
+
     // 2. Capture server-side observed client IP & context
     const observedIp = extractClientIp(req);
-    const userAgent = extractClientUserAgent(req);
 
     // 3. Rate limiting check (Throttles rapid automated scraping)
     const withinLimit = checkDocAccessRateLimit(session.id, 10, 10000);
@@ -2212,40 +2282,176 @@ async function startServer() {
       });
     }
 
-    // 4. Record behavioral activity for Scikit-Learn Isolation Forest tracker
+    // 4. Centralized Pre-Access Authorization & Jurisdiction Validation
+    // This MUST block unauthorized document access BEFORE any document contents or sensitive metadata are returned.
+    const authDecision = authorizeLandRecordAccess(user, record, session, villages);
+
+    if (!authDecision.authorized) {
+      // 4a. Cross-Jurisdiction Access Violation
+      if (authDecision.isCrossJurisdiction) {
+        session.simulatedOutsideJurisdiction = true;
+        sessionActivityTracker.recordFailedOperation(session.id);
+
+        const evalEventDesc = `Cross-Jurisdiction Document Access Attempt: Survey ${record.surveyNumber}`;
+        const evaluation = await trustEngine.evaluateSessionTrust(session, evalEventDesc, user, req.path);
+        const hr = evaluation.hybridResult;
+
+        // Trigger Step-Up OTP if trust score dropped below role threshold
+        const roleThreshold = getRoleOtpThreshold(session.role);
+        if (session.currentTrustScore <= roleThreshold && !session.otpVerified) {
+          const activeOtp = sessionOtpCodes.get(session.id);
+          if (!activeOtp || Date.now() >= activeOtp.expiresAt) {
+            void issueOtpForSession(
+              session,
+              `Cross-Jurisdiction Step-Up: Score (${session.currentTrustScore}) dropped below role threshold (${roleThreshold})`
+            );
+          }
+        }
+
+        const deniedAudit: AuditLog = {
+          id: `al_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+          userId: session.userId,
+          userName: session.userName,
+          role: session.role,
+          actionPerformed: `VIEW_DOCUMENT_DENIED: Survey ${record.surveyNumber} (Cross-Jurisdiction Violation)`,
+          resourceAccessed: `RECORD_DOCUMENT_${record.id}`,
+          trustScoreAtAction: session.currentTrustScore,
+          decision: "DENIED",
+          timestamp: new Date().toISOString(),
+          reasons: ["Cross-Jurisdiction Access Denied: User jurisdiction does not encompass requested record parcel."],
+          ipAddress: observedIp,
+          device: session.deviceFingerprint,
+          ruleRisk: hr.ruleRisk,
+          mlRisk: hr.mlRisk,
+          isolationForestScore: hr.isolationForestScore,
+          normalizedAnomalyScore: hr.normalizedAnomalyScore,
+          finalTrustScore: hr.finalTrustScore,
+          eventType: "CROSS_JURISDICTION_ACCESS_DENIED",
+          requestedRecordId: record.id,
+          requestedRecordJurisdiction: authDecision.recordJurisdiction,
+          authorizedUserJurisdiction: authDecision.userJurisdiction,
+          ruleJValue: 1,
+          rulePenalty: 20,
+          sessionId: session.id
+        };
+        auditLogs.unshift(deniedAudit);
+
+        return res.status(403).json({
+          authorized: false,
+          decision: "DENIED",
+          error: "cross_jurisdiction_access_denied",
+          message: "Access Denied: This land record is outside your authorized jurisdiction. The access attempt has been recorded.",
+          trustScore: session.currentTrustScore,
+          riskLevel: evaluation.riskLevel,
+          policyDecision: evaluation.policyDecision,
+          eventType: "CROSS_JURISDICTION_ACCESS_DENIED",
+          rulePenalty: 20,
+          ruleJValue: 1
+        });
+      }
+
+      // 4b. Separation of Duties Policy (Admin attempting to inspect citizen records)
+      if (authDecision.code === "SEPARATION_OF_DUTIES") {
+        const evaluation = await trustEngine.evaluateSessionTrust(session, `Admin Separation of Duties Violation`, user, req.path);
+        const hr = evaluation.hybridResult;
+
+        const deniedAudit: AuditLog = {
+          id: `al_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+          userId: session.userId,
+          userName: session.userName,
+          role: session.role,
+          actionPerformed: `VIEW_DOCUMENT_DENIED: Survey ${record.surveyNumber} (Separation of Duties)`,
+          resourceAccessed: `RECORD_DOCUMENT_${record.id}`,
+          trustScoreAtAction: session.currentTrustScore,
+          decision: "DENIED",
+          timestamp: new Date().toISOString(),
+          reasons: ["Separation of Duties Policy: System Administrators are barred from inspecting certified land registry contents"],
+          ipAddress: observedIp,
+          device: session.deviceFingerprint,
+          ruleRisk: hr.ruleRisk,
+          mlRisk: hr.mlRisk,
+          isolationForestScore: hr.isolationForestScore,
+          normalizedAnomalyScore: hr.normalizedAnomalyScore,
+          finalTrustScore: hr.finalTrustScore,
+          eventType: "SEPARATION_OF_DUTIES_DENIED",
+          requestedRecordId: record.id,
+          sessionId: session.id
+        };
+        auditLogs.unshift(deniedAudit);
+
+        return res.status(403).json({
+          authorized: false,
+          decision: "DENIED",
+          error: "separation_of_duties",
+          message: "Access Denied: Separation of Duties policy prevents System Administrators from inspecting certified citizen land documents.",
+          trustScore: session.currentTrustScore,
+          riskLevel: evaluation.riskLevel
+        });
+      }
+
+      // 4c. Unauthorized Citizen Document Access Attempt
+      if (authDecision.code === "UNAUTHORIZED_CITIZEN_ACCESS") {
+        session.failedActionCount = (session.failedActionCount || 0) + 1;
+        sessionActivityTracker.recordFailedOperation(session.id);
+
+        const evalEventDesc = `Unauthorized Citizen Document Access Attempt: Survey ${record.surveyNumber}`;
+        const evaluation = await trustEngine.evaluateSessionTrust(session, evalEventDesc, user, req.path);
+        const hr = evaluation.hybridResult;
+
+        const deniedAudit: AuditLog = {
+          id: `al_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+          userId: session.userId,
+          userName: session.userName,
+          role: session.role,
+          actionPerformed: `VIEW_DOCUMENT_DENIED: Survey ${record.surveyNumber} (Unauthorized Citizen Access)`,
+          resourceAccessed: `RECORD_DOCUMENT_${record.id}`,
+          trustScoreAtAction: session.currentTrustScore,
+          decision: "DENIED",
+          timestamp: new Date().toISOString(),
+          reasons: ["Citizens are restricted to accessing their own registered land records"],
+          ipAddress: observedIp,
+          device: session.deviceFingerprint,
+          ruleRisk: hr.ruleRisk,
+          mlRisk: hr.mlRisk,
+          isolationForestScore: hr.isolationForestScore,
+          normalizedAnomalyScore: hr.normalizedAnomalyScore,
+          finalTrustScore: hr.finalTrustScore,
+          eventType: "UNAUTHORIZED_CITIZEN_ACCESS",
+          requestedRecordId: record.id,
+          sessionId: session.id
+        };
+        auditLogs.unshift(deniedAudit);
+
+        return res.status(403).json({
+          authorized: false,
+          decision: "DENIED",
+          error: "unauthorized_citizen_access",
+          message: "Access Denied: You do not possess ownership authorization to inspect this land deed.",
+          trustScore: session.currentTrustScore,
+          riskLevel: evaluation.riskLevel
+        });
+      }
+
+      // 4d. Other authorization denials
+      return res.status(403).json({
+        authorized: false,
+        decision: "DENIED",
+        error: "forbidden",
+        message: authDecision.reason || "Access Denied by Security Policy",
+        trustScore: session.currentTrustScore
+      });
+    }
+
+    // 5. User is within authorized jurisdiction and role scope.
+    // Record behavioral activity for Scikit-Learn Isolation Forest tracker
     sessionActivityTracker.recordRecordView(session.id, 1, record.id);
     const roleRateCheck = sessionActivityTracker.checkRoleDocumentRate(session.id, session.role);
     if (!roleRateCheck.withinLimit) {
       session.simulatedSpamTriggered = true;
     }
 
-    // Real-Time Cross-Jurisdiction Detection
-    if (user?.assignedJurisdiction) {
-      if (session.role === RoleName.VillageAdministrativeOfficer) {
-        if (record.villageId && user.assignedJurisdiction.villageId && record.villageId !== user.assignedJurisdiction.villageId) {
-          session.simulatedOutsideJurisdiction = true;
-        }
-      } else if (session.role === RoleName.RevenueInspector || session.role === RoleName.DeputyTahsildar) {
-        if (record.taluk && user.assignedJurisdiction.taluk && record.taluk.toLowerCase() !== user.assignedJurisdiction.taluk.toLowerCase()) {
-          session.simulatedOutsideJurisdiction = true;
-        }
-      }
-    }
-
-    // Real-Time Unauthorized Citizen Access Check
-    const isCitizenUnauthorized = session.role === RoleName.Citizen && Boolean(user && record.ownerName !== user.name);
-    if (isCitizenUnauthorized) {
-      session.failedActionCount = (session.failedActionCount || 0) + 1;
-      sessionActivityTracker.recordFailedOperation(session.id);
-    }
-
-    // 5. Dynamic Zero Trust & Isolation Forest Evaluation (Atomic, real-time)
-    const evalEventDesc = isCitizenUnauthorized 
-      ? `Unauthorized Citizen Document Access Attempt: Survey ${record.surveyNumber}`
-      : (session.simulatedOutsideJurisdiction 
-          ? `Cross-Jurisdiction Document View: Survey ${record.surveyNumber}` 
-          : `Document View: Survey ${record.surveyNumber}`);
-
+    // Evaluate dynamic trust policy for authorized access
+    const evalEventDesc = `Document View: Survey ${record.surveyNumber}`;
     const evaluation = await trustEngine.evaluateSessionTrust(session, evalEventDesc, user, req.path);
     const hr = evaluation.hybridResult;
 
@@ -2261,70 +2467,7 @@ async function startServer() {
       }
     }
 
-    // 6. RBAC & Separation of Duties Policy Enforcement
-    // 6a. System Administrator Separation of Duties
-    if (session.role === RoleName.SystemAdministrator) {
-      const deniedAudit: AuditLog = {
-        id: `al_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-        userId: session.userId,
-        userName: session.userName,
-        role: session.role,
-        actionPerformed: `VIEW_DOCUMENT_DENIED: Survey ${record.surveyNumber} (Separation of Duties)`,
-        resourceAccessed: `RECORD_DOCUMENT_${record.id}`,
-        trustScoreAtAction: session.currentTrustScore,
-        decision: "DENIED",
-        timestamp: new Date().toISOString(),
-        reasons: ["Separation of Duties Policy: System Administrators are barred from inspecting certified land registry contents"],
-        ipAddress: observedIp,
-        device: session.deviceFingerprint,
-        ruleRisk: hr.ruleRisk,
-        mlRisk: hr.mlRisk,
-        isolationForestScore: hr.isolationForestScore,
-        normalizedAnomalyScore: hr.normalizedAnomalyScore,
-        finalTrustScore: hr.finalTrustScore
-      };
-      auditLogs.unshift(deniedAudit);
-      return res.status(403).json({
-        authorized: false,
-        decision: "DENIED",
-        message: "Access Denied: Separation of Duties policy prevents System Administrators from inspecting certified citizen land documents.",
-        trustScore: session.currentTrustScore,
-        riskLevel: evaluation.riskLevel
-      });
-    }
-
-    // 6b. Citizen role: only allow their own record (Deny access and return updated trust score)
-    if (isCitizenUnauthorized) {
-      const deniedAudit: AuditLog = {
-        id: `al_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-        userId: session.userId,
-        userName: session.userName,
-        role: session.role,
-        actionPerformed: `VIEW_DOCUMENT_DENIED: Survey ${record.surveyNumber} (Unauthorized Citizen Access)`,
-        resourceAccessed: `RECORD_DOCUMENT_${record.id}`,
-        trustScoreAtAction: session.currentTrustScore,
-        decision: "DENIED",
-        timestamp: new Date().toISOString(),
-        reasons: ["Citizens are restricted to accessing their own registered land records"],
-        ipAddress: observedIp,
-        device: session.deviceFingerprint,
-        ruleRisk: hr.ruleRisk,
-        mlRisk: hr.mlRisk,
-        isolationForestScore: hr.isolationForestScore,
-        normalizedAnomalyScore: hr.normalizedAnomalyScore,
-        finalTrustScore: hr.finalTrustScore
-      };
-      auditLogs.unshift(deniedAudit);
-      return res.status(403).json({
-        authorized: false,
-        decision: "DENIED",
-        message: "Access Denied: You do not possess ownership authorization to inspect this land deed.",
-        trustScore: session.currentTrustScore,
-        riskLevel: evaluation.riskLevel
-      });
-    }
-
-    // 6c. Sensitivity Clearance: Confidential documents require Trust Score >= 80 (Full Access tier)
+    // 6. Sensitivity Clearance: Confidential documents require Trust Score >= 80 (Full Access tier)
     if (record.documentClassification === "Confidential" && session.currentTrustScore < trustConfig.thresholds.lowRiskMin) {
       const deniedAudit: AuditLog = {
         id: `al_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
@@ -2356,8 +2499,6 @@ async function startServer() {
     }
 
     // 7. Policy Decision Checks: Blocked Session (< 40)
-    // Viewing a document by itself must NOT automatically generate an OTP.
-    // In Full (80-100), Restricted (60-79), and Read-Only (40-59), authorized documents are released immediately without OTP.
     if ((session.currentTrustScore < trustConfig.thresholds.criticalMax || session.status === "Blocked") && !session.otpVerified) {
       session.status = "Blocked";
       return res.status(403).json({
@@ -2392,7 +2533,7 @@ async function startServer() {
     };
     auditLogs.unshift(allowAudit);
 
-    // Return the authorized certified document payload without exposing unnecessary system secrets
+    // Return the authorized certified document payload
     return res.json({
       authorized: true,
       decision: "ALLOWED",
@@ -2432,6 +2573,104 @@ async function startServer() {
         mlServiceStatus: hr.mlServiceStatus
       }
     });
+  });
+
+  // Protected Document Download Endpoint
+  app.get("/api/records/:id/download/:docType?", enforceZeroTrust, async (req, res) => {
+    const session: ActiveSession = (req as any).session;
+    const user = users.find(u => u.id === session.userId);
+    const { id, docType } = req.params;
+    const record = landRecords.find(r => r.id === id);
+
+    if (!record) {
+      return res.status(404).json({ authorized: false, error: "not_found", message: "Requested land document does not exist." });
+    }
+
+    if (!user) {
+      return res.status(401).json({ authorized: false, error: "unauthorized", message: "User account not recognized." });
+    }
+
+    const decision = authorizeLandRecordAccess(user, record, session, villages);
+    if (!decision.authorized) {
+      if (decision.isCrossJurisdiction) {
+        session.simulatedOutsideJurisdiction = true;
+        sessionActivityTracker.recordFailedOperation(session.id);
+        const evalEventDesc = `Cross-Jurisdiction Download Attempt: Survey ${record.surveyNumber}`;
+        const evaluation = await trustEngine.evaluateSessionTrust(session, evalEventDesc, user, req.path);
+        const hr = evaluation.hybridResult;
+        const observedIp = extractClientIp(req);
+
+        const crossAudit: AuditLog = {
+          id: `al_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+          userId: session.userId,
+          userName: session.userName,
+          role: session.role,
+          actionPerformed: `DOWNLOAD_DOCUMENT_DENIED: Survey ${record.surveyNumber} (Cross-Jurisdiction Violation)`,
+          resourceAccessed: `RECORD_DOCUMENT_${record.id}`,
+          trustScoreAtAction: session.currentTrustScore,
+          decision: "DENIED",
+          timestamp: new Date().toISOString(),
+          reasons: ["Cross-Jurisdiction Access Denied: User jurisdiction does not encompass requested record parcel."],
+          ipAddress: observedIp,
+          device: session.deviceFingerprint,
+          ruleRisk: hr.ruleRisk,
+          mlRisk: hr.mlRisk,
+          isolationForestScore: hr.isolationForestScore,
+          normalizedAnomalyScore: hr.normalizedAnomalyScore,
+          finalTrustScore: hr.finalTrustScore,
+          eventType: "CROSS_JURISDICTION_ACCESS_DENIED",
+          requestedRecordId: record.id,
+          requestedRecordJurisdiction: decision.recordJurisdiction,
+          authorizedUserJurisdiction: decision.userJurisdiction,
+          ruleJValue: 1,
+          rulePenalty: 20,
+          sessionId: session.id
+        };
+        auditLogs.unshift(crossAudit);
+
+        return res.status(403).json({
+          authorized: false,
+          decision: "DENIED",
+          error: "cross_jurisdiction_access_denied",
+          message: "Access Denied: This land record is outside your authorized jurisdiction. The access attempt has been recorded.",
+          trustScore: session.currentTrustScore,
+          riskLevel: evaluation.riskLevel,
+          policyDecision: evaluation.policyDecision,
+          eventType: "CROSS_JURISDICTION_ACCESS_DENIED",
+          rulePenalty: 20,
+          ruleJValue: 1
+        });
+      }
+
+      return res.status(403).json({
+        authorized: false,
+        decision: "DENIED",
+        error: "forbidden",
+        message: decision.reason || "Access Denied by Security Policy",
+        trustScore: session.currentTrustScore
+      });
+    }
+
+    // Determine target file
+    let filePathRelative = record.documentPath || "";
+    if (docType === "patta" && record.pattaDocumentPath) {
+      filePathRelative = record.pattaDocumentPath;
+    } else if (docType === "chitta" && record.chittaDocumentPath) {
+      filePathRelative = record.chittaDocumentPath;
+    } else if (docType === "fmb" && record.fmbCopyPath) {
+      filePathRelative = record.fmbCopyPath;
+    }
+
+    const cleanPath = filePathRelative.replace(/^\//, "");
+    const absolutePath = path.resolve(process.cwd(), cleanPath);
+
+    if (cleanPath && fs.existsSync(absolutePath)) {
+      return res.download(absolutePath);
+    } else {
+      res.setHeader("Content-Disposition", `attachment; filename="${path.basename(cleanPath) || 'document.txt'}"`);
+      res.setHeader("Content-Type", "text/plain");
+      return res.send(`GOVERNMENT OF TAMIL NADU - CERTIFIED LAND RECORD\nSurvey Number: ${record.surveyNumber}\nOwner: ${record.ownerName}\nVillage: ${record.villageName}\nTaluk: ${record.taluk}\nDistrict: ${record.district}\nDigital Seal: TN-REV-ZTA-DIGITALLY-SIGNED-VALID\nIssued Date: ${record.issuedDate || new Date().toISOString()}`);
+    }
   });
 
   app.post("/api/records", enforceZeroTrust, (req, res) => {
@@ -3041,7 +3280,129 @@ async function startServer() {
     timestamp: new Date(Date.now() - 3600000).toISOString()
   });
 
-  app.use("/documents", express.static(path.join(process.cwd(), "documents")));
+  // Zero-Trust Protected Documents Access Handler
+  app.use("/documents", async (req, res, next) => {
+    // 1. Extract session token from Authorization header or query param
+    const authHeader = (req.headers.authorization || req.query.token || req.query.sessionId) as string | undefined;
+    if (!authHeader) {
+      return res.status(401).json({
+        authorized: false,
+        error: "unauthorized",
+        message: "Access Denied: Authentication session required to access land documents."
+      });
+    }
+
+    const session = getSessionById(authHeader);
+    if (!session) {
+      return res.status(401).json({
+        authorized: false,
+        error: "unauthorized",
+        message: "Access Denied: Session expired or invalid."
+      });
+    }
+
+    const user = users.find(u => u.id === session.userId);
+    if (!user) {
+      return res.status(401).json({
+        authorized: false,
+        error: "unauthorized",
+        message: "Access Denied: User account not found."
+      });
+    }
+
+    // 2. Identify which land record this document corresponds to
+    const reqDocPath = `/documents${req.path}`;
+    const matchedRecord = landRecords.find(r => 
+      r.documentPath === reqDocPath ||
+      r.pattaDocumentPath === reqDocPath ||
+      r.chittaDocumentPath === reqDocPath ||
+      r.fmbCopyPath === reqDocPath ||
+      (r.id && req.path.includes(r.id)) ||
+      (r.pattaNumber && req.path.includes(r.pattaNumber)) ||
+      (r.chittaNumber && req.path.includes(r.chittaNumber)) ||
+      (r.surveyNumber && req.path.includes(r.surveyNumber.replace("/", "_")))
+    );
+
+    // If document is linked to a land record, enforce jurisdiction and RBAC
+    if (matchedRecord) {
+      const decision = authorizeLandRecordAccess(user, matchedRecord, session, villages);
+      if (!decision.authorized) {
+        if (decision.isCrossJurisdiction) {
+          session.simulatedOutsideJurisdiction = true;
+          sessionActivityTracker.recordFailedOperation(session.id);
+          const evaluation = await trustEngine.evaluateSessionTrust(
+            session,
+            `Cross-Jurisdiction Static Document Access Attempt: ${req.path}`,
+            user,
+            req.path
+          );
+          const hr = evaluation.hybridResult;
+          const observedIp = extractClientIp(req);
+
+          const crossAudit: AuditLog = {
+            id: `al_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            userId: session.userId,
+            userName: session.userName,
+            role: session.role,
+            actionPerformed: `VIEW_DOCUMENT_DENIED: ${req.path} (Cross-Jurisdiction Violation)`,
+            resourceAccessed: `DOCUMENT_FILE_${matchedRecord.id}`,
+            trustScoreAtAction: session.currentTrustScore,
+            decision: "DENIED",
+            timestamp: new Date().toISOString(),
+            reasons: ["Cross-Jurisdiction Access Denied: User jurisdiction does not encompass requested record parcel."],
+            ipAddress: observedIp,
+            device: session.deviceFingerprint,
+            ruleRisk: hr.ruleRisk,
+            mlRisk: hr.mlRisk,
+            isolationForestScore: hr.isolationForestScore,
+            normalizedAnomalyScore: hr.normalizedAnomalyScore,
+            finalTrustScore: hr.finalTrustScore,
+            eventType: "CROSS_JURISDICTION_ACCESS_DENIED",
+            requestedRecordId: matchedRecord.id,
+            requestedRecordJurisdiction: decision.recordJurisdiction,
+            authorizedUserJurisdiction: decision.userJurisdiction,
+            ruleJValue: 1,
+            rulePenalty: 20,
+            sessionId: session.id
+          };
+          auditLogs.unshift(crossAudit);
+
+          return res.status(403).json({
+            authorized: false,
+            decision: "DENIED",
+            error: "cross_jurisdiction_access_denied",
+            message: "Access Denied: This land record is outside your authorized jurisdiction. The access attempt has been recorded.",
+            trustScore: session.currentTrustScore,
+            riskLevel: evaluation.riskLevel,
+            eventType: "CROSS_JURISDICTION_ACCESS_DENIED",
+            rulePenalty: 20,
+            ruleJValue: 1
+          });
+        }
+
+        return res.status(403).json({
+          authorized: false,
+          decision: "DENIED",
+          error: "forbidden",
+          message: decision.reason || "Access Denied by Security Policy",
+          trustScore: session.currentTrustScore
+        });
+      }
+    }
+
+    // Check static file existence and serve safely
+    const requestedFilePath = path.join(process.cwd(), "documents", req.path);
+    // Prevent directory traversal
+    if (!requestedFilePath.startsWith(path.join(process.cwd(), "documents"))) {
+      return res.status(403).json({ error: "forbidden", message: "Invalid file path" });
+    }
+
+    if (fs.existsSync(requestedFilePath) && fs.statSync(requestedFilePath).isFile()) {
+      return res.sendFile(requestedFilePath);
+    }
+
+    return res.status(404).json({ error: "not_found", message: "Document not found." });
+  });
 
   await seedPropertiesIntoMongoUserCollection();
 
@@ -3072,5 +3433,9 @@ async function startServer() {
   });
 }
 
-startServer();
+const isTestMode = process.env.NODE_ENV === "test" || process.argv.some(arg => arg.includes("--test") || arg.includes("test"));
+
+if (!isTestMode) {
+  startServer();
+}
 
