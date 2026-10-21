@@ -63,6 +63,10 @@ export default function App() {
   const [loading, setLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [showSignup, setShowSignup] = useState(false);
+  const [offHoursAlert, setOffHoursAlert] = useState<{
+    currentTime: string;
+    message: string;
+  } | null>(null);
   const [loginForm, setLoginForm] = useState({
     email: "",
     password: "",
@@ -244,6 +248,7 @@ export default function App() {
   async function handleLogin(email: string, password: string, customDevice?: string, customIp?: string) {
     setLoading(true);
     setErrorMsg("");
+    setOffHoursAlert(null);
     try {
       const res = await safeFetchJson<{ session: ActiveSession; user: User }>("/api/auth/login", {
         method: "POST",
@@ -256,6 +261,12 @@ export default function App() {
         await loadSessionData(res.data.session.id);
         setActiveTab(res.data.session.role === RoleName.SystemAdministrator ? "admin" : "records");
       } else {
+        if (res.data?.code === "OFF_HOURS_NIGHT_ACCESS" || res.data?.incidentType === "Off-Hours Night Access") {
+          setOffHoursAlert({
+            currentTime: res.data.currentTime || res.data.details?.actualIstTime || "IST",
+            message: res.message || res.data.message || ""
+          });
+        }
         setErrorMsg(res.message || "Login failed");
       }
     } catch (err: any) {
@@ -707,8 +718,26 @@ export default function App() {
                   : "Enter your username and password to log in to the portal."}
               </p>
 
-              {errorMsg && (
-                <div className="mb-4 text-xs text-rose-600 bg-rose-50 border border-rose-100 p-3 rounded-lg font-bold">
+              {offHoursAlert ? (
+                <div className="mb-4 text-xs bg-rose-50 border-2 border-rose-300 p-4 rounded-xl shadow-xs text-rose-950 space-y-2 animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2 text-rose-800 font-black text-xs uppercase tracking-wide">
+                    <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>⚠️ OFF-HOURS ACCESS DETECTED</span>
+                  </div>
+                  <p className="font-semibold text-rose-900 leading-relaxed text-[11px]">
+                    Login denied: Access to TrustGuard is restricted between 7:00 PM and 7:00 AM IST.
+                  </p>
+                  <div className="bg-white/90 p-2.5 rounded-lg border border-rose-200 text-[11px] space-y-1 font-mono">
+                    <div className="text-slate-600">Incident Type: <b className="text-rose-900">Off-Hours Night Access</b></div>
+                    <div className="text-slate-600">Current Time: <b className="text-indigo-900">{offHoursAlert.currentTime}</b></div>
+                    <div className="text-slate-600">Security Status: <b className="text-rose-700 font-black uppercase">ACCESS BLOCKED</b></div>
+                  </div>
+                  <p className="text-[11px] text-slate-600 font-medium italic">
+                    Please try again during authorized working hours.
+                  </p>
+                </div>
+              ) : errorMsg && (
+                <div className="mb-4 text-xs text-rose-600 bg-rose-50 border border-rose-100 p-3 rounded-lg font-bold whitespace-pre-line">
                   {errorMsg}
                 </div>
               )}

@@ -35,6 +35,8 @@ import { emailService, resolveActualRecipient, maskEmail } from "./services/emai
 import { sessionActivityTracker } from "./services/sessionActivityTracker";
 import { hybridTrustService } from "./services/hybridTrustService";
 import { authorizeLandRecordAccess } from "./services/authorizationService";
+import { checkIstOffHours } from "./services/offHoursService";
+export { checkIstOffHours };
 
 /**
  * Safely extracts real client IP address accounting for reverse proxies (Render, Cloudflare, Nginx, AWS ELB).
@@ -1349,6 +1351,129 @@ async function startServer() {
   app.post("/api/auth/login", async (req, res) => {
     const { userId, email, password, customDevice, customIp } = req.body;
 
+    // 1. Automatic Real-Time Off-Hours Night Access Detection (07:00 PM - 07:00 AM IST)
+    // Permitted working hours: 07:00:00 AM to 06:59:59 PM IST (Asia/Kolkata timezone)
+    // Restricted hours: 07:00:00 PM (19:00:00) to 06:59:59 AM (< 07:00:00) IST
+    const simulatedHeaderTime = (process.env.NODE_ENV === "test" || req.headers["x-test-simulated-time"])
+      ? (req.headers["x-test-simulated-time"] as string || req.body?.simulatedTime)
+      : undefined;
+    const timeCheck = checkIstOffHours(simulatedHeaderTime);
+
+    if (timeCheck.isOffHours) {
+      // Resolve attempted user profile when available for forensic audit
+      let attemptedUser: User | undefined;
+      const normalizedInput = email ? String(email).trim().toLowerCase() : "";
+      if (userId) {
+        attemptedUser = users.find(u => u.id === userId);
+      } else if (normalizedInput) {
+        attemptedUser = users.find(u => u.email.toLowerCase() === normalizedInput || u.name.toLowerCase() === normalizedInput);
+        if (!attemptedUser && mongoDb) {
+          try {
+            attemptedUser = await mongoDb.collection<User>("users").findOne({
+              $or: [
+                { email: normalizedInput },
+                { name: { $regex: new RegExp(`^${normalizedInput}$`, 'i') } }
+              ]
+            }) || undefined;
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      const clientIp = extractClientIp(req);
+      const clientUa = extractClientUserAgent(req);
+      const observedDevice = customDevice || attemptedUser?.registeredDevice || clientUa;
+      const attemptedUserId = attemptedUser?.id || userId || (normalizedInput ? normalizedInput : "unauthenticated");
+      const attemptedUserName = attemptedUser?.name || "Unauthenticated User";
+      const attemptedRole = attemptedUser?.roleName || RoleName.Citizen;
+      const attemptedEmail = attemptedUser?.email || (email ? String(email) : "");
+
+      // Apply the existing rule engine threat penalty of 10 points for Off-Hours Night Access (O=1)
+      const rulePenalty = 10;
+      const currentTrustScore = 90; // Base 100 - 10 pt penalty = 90
+
+      // 1. Forensic Audit Trail entry
+      const audit: AuditLog = {
+        id: `al_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        userId: attemptedUserId,
+        userName: attemptedUserName,
+        role: attemptedRole,
+        actionPerformed: "LOGIN_DENIED: Off-Hours Night Access",
+        resourceAccessed: "AUTH_GATEWAY",
+        trustScoreAtAction: currentTrustScore,
+        decision: "DENIED",
+        timestamp: new Date().toISOString(),
+        previousTrustScore: 100,
+        currentTrustScore,
+        riskLevel: "MEDIUM",
+        reasons: [
+          `Off-Hours Night Access: Login attempted at ${timeCheck.formattedIstTime}. Access to TrustGuard is restricted between 7:00 PM and 7:00 AM IST.`,
+          "Working hours security restriction enforced (Asia/Kolkata)."
+        ],
+        ipAddress: clientIp,
+        device: observedDevice,
+        ruleRisk: rulePenalty,
+        rulePenalty,
+        eventType: "OFF_HOURS_NIGHT_ACCESS",
+        policyAction: "ACCESS BLOCKED: Login rejected during restricted hours."
+      };
+      recordAuditLog(audit);
+
+      // 2. Dispatch security alert to alertManager and securityAlerts
+      const alert: SecurityAlert = {
+        id: `alt_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        userId: attemptedUserId,
+        userName: attemptedUserName,
+        userEmail: attemptedEmail,
+        userRole: attemptedRole,
+        previousTrustScore: 100,
+        currentTrustScore,
+        riskLevel: "MEDIUM",
+        reasons: [
+          `OFF-HOURS ACCESS DETECTED: Login attempt during restricted hours (${timeCheck.formattedIstTime})`,
+          "Working hours policy violation: Access allowed only from 07:00 AM to 07:00 PM IST."
+        ],
+        ipAddress: clientIp,
+        location: "Chennai, TN, IN",
+        deviceFingerprint: observedDevice,
+        policyAction: "ACCESS BLOCKED",
+        timestamp: new Date().toISOString(),
+        emailAlertSent: false,
+        emailRecipient: attemptedEmail || trustConfig.smtp.securityAlertEmail,
+        emailStatus: "SIMULATED_LOGGED",
+        requestResource: "/api/auth/login",
+        status: "NEW"
+      };
+      recordSecurityAlert(alert);
+
+      const displayMessage = `⚠️ OFF-HOURS ACCESS DETECTED\n\nLogin denied: Access to TrustGuard is restricted between 7:00 PM and 7:00 AM IST.\n\nIncident Type: Off-Hours Night Access\nCurrent Time: ${timeCheck.formattedIstTime}\nSecurity Status: ACCESS BLOCKED\n\nPlease try again during authorized working hours.`;
+
+      console.warn(`[TrustGuard Security] Off-Hours Login Blocked for ${attemptedUserId} (${attemptedRole}) at ${timeCheck.formattedIstTime}`);
+
+      // Return HTTP 403 Forbidden without creating a session or issuing a JWT token
+      return res.status(403).json({
+        authorized: false,
+        error: "off_hours_access_denied",
+        code: "OFF_HOURS_NIGHT_ACCESS",
+        decision: "BLOCKED",
+        incidentType: "Off-Hours Night Access",
+        currentTime: timeCheck.formattedIstTime,
+        timeOnly: timeCheck.timeOnlyIst,
+        securityStatus: "ACCESS BLOCKED",
+        message: displayMessage,
+        details: {
+          attemptedUser: attemptedUserId,
+          attemptedRole,
+          actualIstTime: timeCheck.formattedIstTime,
+          timezone: "Asia/Kolkata",
+          restrictedPeriod: "7:00 PM to 7:00 AM IST",
+          rulePenalty: 10,
+          ruleOValue: 1
+        }
+      });
+    }
+
     let user: User | undefined;
 
     if (userId) {
@@ -1524,6 +1649,18 @@ async function startServer() {
     sessions.push(newSession);
 
     res.json({ session: newSession, user, token: jwtToken });
+  });
+
+  // Operating Hours and IST Gateway Status
+  app.get("/api/auth/operating-hours", (req, res) => {
+    const timeCheck = checkIstOffHours();
+    res.json({
+      timezone: "Asia/Kolkata",
+      currentTimeIst: timeCheck.formattedIstTime,
+      isOffHours: timeCheck.isOffHours,
+      operatingHours: "07:00 AM - 07:00 PM IST",
+      restrictedHours: "07:00 PM - 07:00 AM IST"
+    });
   });
 
   app.post("/api/auth/logout", (req, res) => {
