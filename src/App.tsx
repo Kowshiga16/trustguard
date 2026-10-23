@@ -698,6 +698,31 @@ export default function App() {
               <p className="text-xs text-slate-400 leading-relaxed pt-1">
                 TrustGuard introduces a <b>Session-Lifecycle-Driven Dynamic Zero Trust</b> framework. By continuously computing session context, the Policy Engine denies, limits, or requests multi-factor OTP step-up instantly as context drifts.
               </p>
+
+              <div className="overflow-hidden rounded-lg border border-slate-700/80 bg-slate-800/40">
+                <table className="w-full text-xs text-white border-collapse">
+                  <thead>
+                    <tr className="bg-slate-800/90 text-white border-b border-slate-700/80">
+                      <th className="py-1.5 px-3 text-left font-semibold text-white">Name</th>
+                      <th className="py-1.5 px-3 text-right font-semibold text-white">Roll No</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/60">
+                    <tr>
+                      <td className="py-1.5 px-3 font-medium text-white">Kowshiga SV</td>
+                      <td className="py-1.5 px-3 text-right font-mono text-white">23TH0244</td>
+                    </tr>
+                    <tr>
+                      <td className="py-1.5 px-3 font-medium text-white">Lohitha V</td>
+                      <td className="py-1.5 px-3 text-right font-mono text-white">23TH0248</td>
+                    </tr>
+                    <tr>
+                      <td className="py-1.5 px-3 font-medium text-white">Poovazaki A</td>
+                      <td className="py-1.5 px-3 text-right font-mono text-white">23TH0271</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <div className="text-[9px] text-slate-500 font-bold space-y-1 mt-8 border-t border-slate-800 pb-1 pt-4 font-mono uppercase tracking-wide">
