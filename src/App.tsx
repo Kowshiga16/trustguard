@@ -58,6 +58,7 @@ export default function App() {
     pendingMutations: 0,
     securityIncidentsCount: 0
   });
+  const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
 
   const [activeTab, setActiveTab] = useState<string>("records");
   const [loading, setLoading] = useState<boolean>(true);
@@ -183,13 +184,23 @@ export default function App() {
         if (tLogsRes.ok && Array.isArray(tLogsRes.data)) setTrustLogs(tLogsRes.data);
         if (aLogsRes.ok && Array.isArray(aLogsRes.data)) setAuditLogs(aLogsRes.data);
         if (statsRes.ok && statsRes.data) setStats(statsRes.data);
+
+        // Periodically refresh active officer sessions for Administrator
+        if (session.role === RoleName.SystemAdministrator) {
+          const sessRes = await safeFetchJson<ActiveSession[]>("/api/admin/sessions", {
+            headers: { "Authorization": session.id }
+          });
+          if (sessRes.ok && Array.isArray(sessRes.data)) {
+            setActiveSessions(sessRes.data);
+          }
+        }
       } catch (err) {
         // quiet background sync
       }
     }, 2500);
 
     return () => clearInterval(interval);
-  }, [session?.id]);
+  }, [session?.id, session?.role]);
 
   // 2. Load all records, logs and stats linked to a session
   async function loadSessionData(token: string) {
@@ -238,6 +249,12 @@ export default function App() {
       const statsRes = await safeFetchJson<SystemStats>("/api/system/stats");
       if (statsRes.ok && statsRes.data) {
         setStats(statsRes.data);
+      }
+
+      // Active Sessions (for Admin PDP override & monitoring)
+      const sessRes = await safeFetchJson<ActiveSession[]>("/api/admin/sessions", { headers });
+      if (sessRes.ok && Array.isArray(sessRes.data)) {
+        setActiveSessions(sessRes.data);
       }
     } catch (err) {
       console.warn("Load session details error:", err);
@@ -656,6 +673,12 @@ export default function App() {
         })
       });
       if (res.ok) {
+        const sessRes = await safeFetchJson<ActiveSession[]>("/api/admin/sessions", {
+          headers: { "Authorization": session.id }
+        });
+        if (sessRes.ok && Array.isArray(sessRes.data)) {
+          setActiveSessions(sessRes.data);
+        }
         await loadSessionData(session.id);
         return true;
       }
@@ -931,7 +954,7 @@ export default function App() {
   const isBlocked = (session.currentTrustScore < 25 || session.status === "Blocked") && !session.otpVerified;
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col text-slate-700 font-sans">
+    <div className="min-h-screen bg-slate-50 flex flex-col text-slate-700 font-sans w-full max-w-full overflow-x-hidden">
       
       {/* Block Overlay (Full screen restriction) */}
       {isBlocked && (
@@ -997,7 +1020,7 @@ export default function App() {
       />
 
       {/* Master Content Portal Layout */}
-      <div className="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start overflow-x-hidden">
         
         {/* Left Side: Operations Dashboard (7 or 8 cols) */}
         <div className="lg:col-span-8 space-y-6">
@@ -1034,7 +1057,7 @@ export default function App() {
           <StatsDashboard
             stats={stats}
             session={session}
-            activeSessions={[]} // Loaded separately if needed
+            activeSessions={activeSessions}
             onAdminOverride={handleAdminOverride}
           />
 
@@ -1189,40 +1212,62 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-700">
-                        {/* We fetch active sessions dynamically, loading them into are */}
-                        <tr className="hover:bg-slate-50/50">
-                          <td className="py-3 px-4 font-sans font-bold">Ramesh Kumar</td>
-                          <td className="py-3 px-4 font-sans">Citizen</td>
-                          <td className="py-3 px-4">192.168.1.104</td>
-                          <td className="py-3 px-4 text-amber-600 font-extrabold">75/100</td>
-                          <td className="py-3 px-4 font-sans text-emerald-600 font-semibold">Active</td>
-                          <td className="py-3 px-4 text-right">
-                            <button 
-                              onClick={async () => {
-                                const targetId = "sess_" + Date.now();
-                                // Manual API trigger
-                                const promptScore = prompt("Enter emergency trust score (0 - 100):", "90");
-                                if (promptScore) {
-                                  // Get active sessions from backend first
-                                  const sRes = await safeFetchJson<any[]>("/api/admin/sessions", {
-                                    headers: { "Authorization": session.id }
-                                  });
-                                  const sData = Array.isArray(sRes.data) ? sRes.data : [];
-                                  const target = sData.find((s: any) => s.userId !== session.userId);
-                                  if (target) {
-                                    await handleAdminOverride(target.id, parseInt(promptScore));
-                                    alert("Emergency override successfully pushed to PEP agents!");
-                                  } else {
-                                    alert("No other active officer sessions currently loaded. Try login as Suresh DEO or Anitha VAO in another tab first!");
-                                  }
-                                }
-                              }} 
-                              className="text-[10px] font-bold text-indigo-600 hover:text-indigo-500 bg-indigo-50 hover:bg-indigo-100 py-1 px-2 border border-indigo-150 rounded cursor-pointer"
-                            >
-                              Overrule Score
-                            </button>
-                          </td>
-                        </tr>
+                        {activeSessions.filter((s) => s.id !== session.id).length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="py-6 text-center text-slate-400 font-sans text-xs">
+                              No other active officer sessions currently loaded in server memory.
+                            </td>
+                          </tr>
+                        ) : (
+                          activeSessions
+                            .filter((s) => s.id !== session.id)
+                            .map((s) => (
+                              <tr key={s.id} className="hover:bg-slate-50/50">
+                                <td className="py-3 px-4 font-sans font-bold">{s.userName}</td>
+                                <td className="py-3 px-4 font-sans">{s.role}</td>
+                                <td className="py-3 px-4">{s.currentRequestIp || s.ipAddress}</td>
+                                <td className={`py-3 px-4 font-extrabold ${
+                                  s.currentTrustScore >= 76 
+                                    ? "text-emerald-600" 
+                                    : s.currentTrustScore >= 61 
+                                    ? "text-amber-600" 
+                                    : s.currentTrustScore >= 51 
+                                    ? "text-orange-600" 
+                                    : "text-rose-600"
+                                }`}>
+                                  {s.currentTrustScore}/100
+                                </td>
+                                <td className="py-3 px-4 font-sans">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    s.status === "Active" 
+                                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200" 
+                                      : "bg-rose-50 text-rose-700 border border-rose-200"
+                                  }`}>
+                                    {s.status}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-right">
+                                  <button 
+                                    onClick={async () => {
+                                      const promptScore = prompt(`Enter emergency trust score for ${s.userName} (0 - 100):`, s.currentTrustScore.toString());
+                                      if (promptScore !== null && promptScore.trim() !== "") {
+                                        const parsed = parseInt(promptScore, 10);
+                                        if (!isNaN(parsed) && parsed >= 0 && parsed <= 100) {
+                                          await handleAdminOverride(s.id, parsed);
+                                          alert(`Emergency override of ${parsed}/100 successfully applied to ${s.userName}!`);
+                                        } else {
+                                          alert("Please enter a valid number between 0 and 100.");
+                                        }
+                                      }
+                                    }} 
+                                    className="text-[10px] font-bold text-indigo-600 hover:text-indigo-500 bg-indigo-50 hover:bg-indigo-100 py-1 px-2 border border-indigo-150 rounded cursor-pointer"
+                                  >
+                                    Overrule Score
+                                  </button>
+                                </td>
+                              </tr>
+                            ))
+                        )}
                       </tbody>
                     </table>
                   </div>

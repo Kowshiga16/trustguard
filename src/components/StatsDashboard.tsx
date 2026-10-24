@@ -419,7 +419,14 @@ export default function StatsDashboard({
                   <select
                     required
                     value={targetSessId}
-                    onChange={(e) => setTargetSessId(e.target.value)}
+                    onChange={(e) => {
+                      const selectedId = e.target.value;
+                      setTargetSessId(selectedId);
+                      const selectedSession = activeSessions.find((s) => s.id === selectedId);
+                      if (selectedSession && typeof selectedSession.currentTrustScore === "number") {
+                        setOverrideValue(selectedSession.currentTrustScore);
+                      }
+                    }}
                     className="w-full px-3 py-2 border border-slate-250 bg-slate-50/50 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 cursor-pointer text-slate-700 font-semibold"
                   >
                     <option value="">Choose session...</option>
@@ -427,7 +434,7 @@ export default function StatsDashboard({
                       .filter((s) => s.id !== session.id) // Cannot override self
                       .map((s) => (
                         <option key={s.id} value={s.id}>
-                          {s.userName} ({s.role}) - Current: {s.currentTrustScore}
+                          {s.userName} ({s.role}) - Current: {s.currentTrustScore}/100 [{s.status}]
                         </option>
                       ))}
                   </select>
