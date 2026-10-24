@@ -156,17 +156,23 @@ export default function AdminDashboard({ session, users, villages, auditLogs, tr
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-indigo-600">
-              <ShieldCheck className="w-5 h-5" />
-              <span className="text-xs font-black uppercase tracking-widest">System Admin Dashboard</span>
-            </div>
-            <h2 className="text-xl font-black text-slate-900 mt-2">Revenue User Administration</h2>
+      {/* Root Governance Administrative Banner (Admin UI Variation) */}
+      <div className="bg-linear-to-r from-slate-900 via-purple-950 to-indigo-950 text-white rounded-xl p-5 shadow-sm border border-purple-900/50 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-400/30 flex items-center justify-center text-purple-300 shadow-inner">
+            <ShieldCheck className="w-5.5 h-5.5 text-purple-400" />
           </div>
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
-            <Activity className="w-4 h-4 text-emerald-500" /> Access: {session.role}
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black uppercase tracking-widest text-purple-300">Root Governance Console</span>
+              <span className="bg-purple-500/25 border border-purple-400/40 text-purple-200 text-[9px] font-black uppercase px-2 py-0.5 rounded-full">Super Admin</span>
+            </div>
+            <h2 className="text-lg font-black text-white mt-0.5">Revenue User Administration & Security Kernel</h2>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="text-right text-[11px] font-mono text-purple-200 bg-black/30 px-3 py-1.5 rounded-lg border border-purple-500/30">
+            Separation of Duties: <span className="text-emerald-400 font-bold">Active & Enforced</span>
           </div>
         </div>
       </div>

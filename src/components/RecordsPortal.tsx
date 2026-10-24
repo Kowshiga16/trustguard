@@ -391,7 +391,7 @@ export default function RecordsPortal({
               className={`flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-lg shadow-xs transition-all cursor-pointer ${
                 isReadOnly
                   ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
-                  : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm shadow-indigo-100"
+                  : "bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm shadow-emerald-100"
               }`}
             >
               {isReadOnly ? <Lock className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
@@ -410,6 +410,27 @@ export default function RecordsPortal({
           )}
         </div>
       </div>
+
+      {/* DEO Dedicated Operation Banner (DEO UI Variation) */}
+      {isDEO && (
+        <div className="mb-5 bg-linear-to-r from-emerald-50 via-teal-50 to-white border border-emerald-200/90 p-3.5 rounded-xl flex items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-700">
+              <FileCheck className="w-4.5 h-4.5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black uppercase tracking-wider text-emerald-900">Data Entry Terminal Mode</span>
+                <span className="bg-emerald-200/80 border border-emerald-300 text-emerald-900 text-[9px] font-black uppercase px-2 py-0.5 rounded-full">Ingestion Enabled</span>
+              </div>
+              <p className="text-[11px] text-emerald-700 font-medium">Cadastral parcel ingestion, Patta registration, and mutation draft generation active.</p>
+            </div>
+          </div>
+          <span className="hidden sm:inline-block text-[10px] font-bold text-emerald-800 bg-emerald-100/80 border border-emerald-200 px-2.5 py-1 rounded-md">
+            Operator Access Level
+          </span>
+        </div>
+      )}
 
       {/* Trust Warnings */}
       {isReadOnly && !isAdmin && (

@@ -5,7 +5,7 @@
 
 import React from "react";
 import { ShieldCheck, UserCheck, LogOut, KeyRound } from "lucide-react";
-import { ActiveSession } from "../types";
+import { ActiveSession, RoleName } from "../types";
 
 interface NavigationProps {
   session: ActiveSession | null;
@@ -43,9 +43,21 @@ export default function Navigation({
             <div className="text-right hidden sm:block">
               <span className="block text-xs font-bold text-slate-800">{session.userName}</span>
               <span className="block text-[11px] font-semibold text-indigo-700 font-mono">{session.userEmail || "officer@revenue.tn.gov.in"}</span>
-              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                Role: <b className="text-indigo-600 uppercase tracking-wider font-extrabold">{session.role.replace("Administrative ", "")}</b>
-              </span>
+              <div className="flex items-center justify-end gap-1.5 mt-0.5">
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  Role: <b className="text-indigo-600 uppercase tracking-wider font-extrabold">{session.role.replace("Administrative ", "")}</b>
+                </span>
+                {session.role === RoleName.SystemAdministrator && (
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200">
+                    Root Admin
+                  </span>
+                )}
+                {session.role === RoleName.DataEntryOperator && (
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    DEO Mode
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Step-Up OTP Verification Trigger */}
@@ -77,9 +89,23 @@ export default function Navigation({
             </div>
 
             <div className="relative">
-              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 py-1.5 px-3.5 rounded-lg text-xs font-bold text-slate-700">
-                <UserCheck className="w-4 h-4 text-indigo-600" />
-                <span className="hidden md:inline">Signed In</span>
+              <div className={`flex items-center gap-2 border py-1.5 px-3.5 rounded-lg text-xs font-bold ${
+                session.role === RoleName.SystemAdministrator
+                  ? "bg-purple-50/80 border-purple-200 text-purple-900 shadow-2xs"
+                  : session.role === RoleName.DataEntryOperator
+                  ? "bg-emerald-50/80 border-emerald-200 text-emerald-900 shadow-2xs"
+                  : "bg-slate-50 border-slate-200 text-slate-700"
+              }`}>
+                <UserCheck className={`w-4 h-4 ${
+                  session.role === RoleName.SystemAdministrator
+                    ? "text-purple-600"
+                    : session.role === RoleName.DataEntryOperator
+                    ? "text-emerald-600"
+                    : "text-indigo-600"
+                }`} />
+                <span className="hidden md:inline">
+                  {session.role === RoleName.SystemAdministrator ? "Admin Console" : session.role === RoleName.DataEntryOperator ? "Operator Mode" : "Signed In"}
+                </span>
                 <span className="inline md:hidden">Identity</span>
               </div>
             </div>
