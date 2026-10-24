@@ -43,6 +43,7 @@ export default function AdminDashboard({ session, users, villages, auditLogs, tr
   const [updatingAlertId, setUpdatingAlertId] = useState<string | null>(null);
   const [resolutionNote, setResolutionNote] = useState("");
   const [selectedAlertForNote, setSelectedAlertForNote] = useState<string | null>(null);
+  const isReadOnly = session.currentTrustScore <= 75;
 
   const fetchAlerts = async () => {
     try {
@@ -109,6 +110,10 @@ export default function AdminDashboard({ session, users, villages, auditLogs, tr
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (isReadOnly) {
+      setError("User creation locked: Session is in Read-Only Mode (Trust Score: 61–75).");
+      return;
+    }
     setError("");
     setSuccess("");
 
@@ -214,8 +219,16 @@ export default function AdminDashboard({ session, users, villages, auditLogs, tr
               <button type="button" onClick={() => setForm({ ...form, name: "", email: "", phone: "", district: "", taluk: "", villageId: "", password: "" })} className="px-4 py-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-500 hover:bg-slate-50">
                 Reset
               </button>
-              <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-500">
-                Create User
+              <button
+                type="submit"
+                disabled={isReadOnly}
+                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                  isReadOnly
+                    ? "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed"
+                    : "bg-indigo-600 text-white hover:bg-indigo-500 cursor-pointer"
+                }`}
+              >
+                {isReadOnly ? "Read-Only (Locked)" : "Create User"}
               </button>
             </div>
           </form>

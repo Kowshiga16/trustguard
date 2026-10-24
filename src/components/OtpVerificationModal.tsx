@@ -14,11 +14,9 @@ interface OtpVerificationModalProps {
   onLogout: () => void;
 }
 
-function getRoleThreshold(roleName?: string): number {
-  const norm = (roleName || "").toLowerCase();
-  if (norm.includes("admin")) return 70;
-  if (norm.includes("tahsildar") && !norm.includes("deputy")) return 70;
-  if (norm.includes("deputy")) return 65;
+function getRoleThreshold(session?: ActiveSession | null): number {
+  if (session?.roleThreshold) return session.roleThreshold;
+  const norm = (session?.role || "").toLowerCase();
   if (norm.includes("citizen")) return 50;
   return 60;
 }
@@ -37,13 +35,18 @@ export default function OtpVerificationModal({
   const [success, setSuccess] = useState(false);
   const [deliveryStatus, setDeliveryStatus] = useState<string>("SENT");
 
-  const roleThreshold = getRoleThreshold(session?.role);
+  const roleThreshold = getRoleThreshold(session);
 
+  const isBlocked = Boolean(session && (session.currentTrustScore <= 50 || session.status === "Blocked"));
+  const isScoreInChallengeRange = Boolean(session && session.currentTrustScore > 50 && session.currentTrustScore <= roleThreshold);
   const isOtpNeeded = Boolean(
     session &&
     !session.otpVerified &&
-    (session.currentTrustScore <= roleThreshold || session.status === "Blocked" || (session as any).requiresOtp)
+    !isBlocked &&
+    (isScoreInChallengeRange || (Boolean((session as any).requiresOtp) && session.currentTrustScore > 50))
   );
+
+  const hasRequestedRef = React.useRef<string | null>(null);
 
   useEffect(() => {
     if (isOtpNeeded && session) {
@@ -51,7 +54,12 @@ export default function OtpVerificationModal({
       setErrorMsg("");
       setSuccess(false);
       setResendSuccess(false);
-      void onRequestOtp();
+
+      const challengeKey = `${session.id}_${session.currentTrustScore}`;
+      if (hasRequestedRef.current !== challengeKey) {
+        hasRequestedRef.current = challengeKey;
+        void onRequestOtp();
+      }
 
       const pollStatus = () => {
         fetch(`/api/security/otp-status/${session.id}`)
@@ -65,8 +73,10 @@ export default function OtpVerificationModal({
       pollStatus();
       const interval = setInterval(pollStatus, 1500);
       return () => clearInterval(interval);
+    } else {
+      hasRequestedRef.current = null;
     }
-  }, [session?.id, session?.otpVerified, isOtpNeeded]);
+  }, [session?.id, session?.otpVerified, session?.currentTrustScore, isOtpNeeded]);
 
   if (!isOtpNeeded) {
     return null;

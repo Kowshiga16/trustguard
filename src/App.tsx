@@ -157,22 +157,10 @@ export default function App() {
           const freshSession = sessRes.data.session || sessRes.data;
           setSession((prev) => {
             if (!prev) return freshSession;
-            if (
-              prev.currentTrustScore !== freshSession.currentTrustScore ||
-              prev.status !== freshSession.status ||
-              prev.failedActionCount !== freshSession.failedActionCount ||
-              prev.otpVerified !== freshSession.otpVerified ||
-              prev.simulatedIpMismatch !== freshSession.simulatedIpMismatch ||
-              prev.simulatedDeviceMismatch !== freshSession.simulatedDeviceMismatch ||
-              prev.simulatedOutsideJurisdiction !== freshSession.simulatedOutsideJurisdiction ||
-              prev.simulatedSpamTriggered !== freshSession.simulatedSpamTriggered ||
-              prev.currentRequestIp !== freshSession.currentRequestIp ||
-              prev.requiresOtp !== freshSession.requiresOtp
-            ) {
-              return { ...prev, ...freshSession };
-            }
-            return prev;
+            return { ...prev, ...freshSession };
           });
+        } else if (sessRes.status === 403 && sessRes.data?.error === "blocked") {
+          setSession((prev) => prev ? { ...prev, status: "Blocked", currentTrustScore: sessRes.data?.trustScore ?? prev.currentTrustScore } : null);
         }
 
         // Periodically refresh audit & trust logs
@@ -950,8 +938,8 @@ export default function App() {
     );
   }
 
-  // PDP ENFORCED SUSPENSION LOCK SCREEN (When Trust Score < 25)
-  const isBlocked = (session.currentTrustScore < 25 || session.status === "Blocked") && !session.otpVerified;
+  // PDP ENFORCED SUSPENSION LOCK SCREEN (Policy Tier: 0–50 Blocked / Terminated)
+  const isBlocked = Boolean(session && (session.currentTrustScore <= 50 || session.status === "Blocked"));
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col text-slate-700 font-sans w-full max-w-full overflow-x-hidden">
@@ -969,7 +957,7 @@ export default function App() {
             </div>
             
             <p className="text-slate-400 leading-relaxed text-[11px] font-sans font-medium">
-              Your active session has been immediately suspended. The trust engine computed your dynamic posture score to be <b>{session.currentTrustScore}/100</b>, violating the minimum operating threshold (25).
+              Your active session has been terminated/locked due to critical trust degradation. The trust engine computed your dynamic posture score to be <b>{session.currentTrustScore}/100</b>, falling into the blocked tier (0–50). Fresh re-authentication is required to access protected resources.
             </p>
 
             <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 text-left w-full space-y-1.5 text-[10px]">
@@ -986,18 +974,9 @@ export default function App() {
             <div className="pt-2 w-full flex gap-3 font-sans text-xs font-bold">
               <button
                 onClick={handleLogout}
-                className="flex-1 py-2 px-4 border border-slate-700 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
+                className="w-full py-2.5 px-4 bg-rose-600 hover:bg-rose-500 text-white rounded-lg shadow-sm transition-all cursor-pointer font-bold text-center"
               >
-                Sign Out / Exit
-              </button>
-              <button
-                onClick={async () => {
-                  await handleRequestOtp();
-                  setSession(prev => prev ? { ...prev, requiresOtp: true } : null);
-                }}
-                className="flex-1 py-2 px-4 bg-rose-600 hover:bg-rose-500 text-white rounded-lg shadow-sm transition-all cursor-pointer"
-              >
-                Unlock via OTP
+                Sign Out / Return to Login
               </button>
             </div>
           </div>
@@ -1049,6 +1028,26 @@ export default function App() {
                     </span>
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Read-Only Mode Notification Banner (Requirement 2.B: Policy Tier 61–75) */}
+          {session.currentTrustScore >= 61 && session.currentTrustScore <= 75 && (
+            <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-xl shadow-xs flex items-start gap-3.5 border border-amber-200/60">
+              <ShieldAlert className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+              <div className="flex-1">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <span>Read-Only Mode Active</span>
+                  </h4>
+                  <span className="text-[10px] font-mono bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded font-extrabold border border-amber-300">
+                    Policy Tier: 61–75
+                  </span>
+                </div>
+                <p className="text-xs text-amber-800 mt-1">
+                  Due to elevated risk, your session is operating in <b>Read-Only Mode</b> (Trust Score: <b className="font-bold">{session.currentTrustScore}/100</b>). You can view authorized land records and details, but all modifications, additions, and approvals are locked.
+                </p>
               </div>
             </div>
           )}

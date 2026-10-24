@@ -40,6 +40,7 @@ export default function CitizenDashboard({ session, users, villages, records, ap
   const [viewingDoc, setViewingDoc] = useState<any>(null);
   const [securityNotice, setSecurityNotice] = useState<{ message: string; type: "error" | "success" } | null>(null);
   const [inspectingDocId, setInspectingDocId] = useState<string | null>(null);
+  const isReadOnly = session.currentTrustScore <= 75;
 
   const handleInspectDocument = async (recordId: string, ownerName: string) => {
     setInspectingDocId(recordId);
@@ -89,6 +90,10 @@ export default function CitizenDashboard({ session, users, villages, records, ap
 
   const submitApplication = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isReadOnly) {
+      setError("Write operations locked: Session is in Read-Only Mode (Trust Score: 61–75). Applications cannot be submitted.");
+      return;
+    }
     setLoading(true);
     setError("");
 
@@ -326,8 +331,16 @@ export default function CitizenDashboard({ session, users, villages, records, ap
               </div>
 
               <div className="flex justify-end">
-                <button type="submit" disabled={loading} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-[11px] font-black hover:bg-indigo-700">
-                  {loading ? "Submitting..." : "Submit Application"}
+                <button
+                  type="submit"
+                  disabled={loading || isReadOnly}
+                  className={`px-4 py-2 rounded-lg text-[11px] font-black transition-all ${
+                    isReadOnly
+                      ? "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed"
+                      : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
+                  }`}
+                >
+                  {isReadOnly ? "Read-Only (Locked)" : (loading ? "Submitting..." : "Submit Application")}
                 </button>
               </div>
             </form>

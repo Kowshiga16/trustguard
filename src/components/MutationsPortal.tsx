@@ -27,7 +27,7 @@ export default function MutationsPortal({
 
   if (!session) return null;
 
-  const isReadOnly = session.currentTrustScore < 80;
+  const isReadOnly = session.currentTrustScore <= 75;
   const isAdmin = session.role === RoleName.SystemAdministrator;
 
   const getRequiredRoleForStatus = (status: string) => {
@@ -105,7 +105,7 @@ export default function MutationsPortal({
         <div className="mb-5 bg-amber-50/70 border border-amber-200/60 p-4 rounded-lg flex items-start gap-3">
           <ShieldAlert className="w-4.5 h-4.5 text-amber-600 shrink-0 mt-0.5" />
           <p className="text-xs text-amber-800 leading-relaxed font-medium">
-            <b>Approval Operations Suspended:</b> Mutation authorization is a high-risk mutation event. Because your Trust Score is <b>{session.currentTrustScore}</b> (&lt; 80), the Dynamic Policy PEP has suspended your approval/rejection capabilities.
+            <b>Approval Operations Suspended:</b> Mutation authorization is a sensitive operation. Because your Trust Score is <b>{session.currentTrustScore}/100</b> (Policy Tier: 61–75 Read-Only Mode), the Dynamic Policy PEP has locked approval/rejection capabilities.
           </p>
         </div>
       )}

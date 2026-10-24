@@ -24,7 +24,7 @@ export default function TrustProgress({ session, onSessionUpdate }: TrustProgres
             onSessionUpdate?.({
               ...session,
               currentTrustScore: data.finalTrustScore,
-              status: data.finalTrustScore < 40 ? "Blocked" : "Active"
+              status: data.finalTrustScore <= 50 ? "Blocked" : "Active"
             });
           }
         }
@@ -48,28 +48,28 @@ export default function TrustProgress({ session, onSessionUpdate }: TrustProgres
   let Icon = HelpCircle;
   let accessDecision = "UNKNOWN";
 
-  if (score >= 80) {
-    bandName = "Low Risk • Full Access";
+  if (score >= 76) {
+    bandName = "Full Access Tier";
     bandColor = "bg-emerald-950/30 text-emerald-300 border-emerald-900/40";
-    bandDesc = "Optimal zero trust posture. Normal access, viewing certified records, creating mutations, approvals enabled. OTP not required.";
+    bandDesc = "Optimal zero trust posture (76–100). Full access to role-permitted features, records viewing, mutations, and approvals.";
     Icon = ShieldCheck;
     accessDecision = "FULL";
-  } else if (score >= 60) {
-    bandName = "Medium Risk • Restricted";
+  } else if (score >= 61) {
+    bandName = "Read-Only Mode";
     bandColor = "bg-amber-950/30 text-amber-300 border-amber-900/40";
-    bandDesc = "Moderate risk or contextual drift. Permitted records viewable. Step-Up OTP required for sensitive mutations and approvals.";
-    Icon = Shield;
-    accessDecision = "RESTRICTED";
-  } else if (score >= 40) {
-    bandName = "High Risk • Read-Only";
-    bandColor = "bg-orange-950/30 text-orange-300 border-orange-900/40";
-    bandDesc = "Elevated risk detected. Permitted records viewable in Read-Only mode. Mutations and approvals blocked. Step-Up OTP required to restore privileges.";
+    bandDesc = "Elevated session risk (61–75). Authorized records are viewable. Creating, editing, approving, or submitting records is locked.";
     Icon = ShieldAlert;
     accessDecision = "READ-ONLY";
+  } else if (score >= 51) {
+    bandName = "MFA / Step-Up OTP Challenge";
+    bandColor = "bg-orange-950/30 text-orange-300 border-orange-900/40";
+    bandDesc = "Step-Up verification threshold triggered (51–60). One-time passcode verification required to restore access.";
+    Icon = Shield;
+    accessDecision = "STEP-UP OTP";
   } else {
-    bandName = "Critical Risk • Blocked";
+    bandName = "Session Terminated / Blocked";
     bandColor = "bg-rose-950/30 text-rose-300 border-rose-900/40";
-    bandDesc = "Severe anomaly or multiple security violations. Access blocked. Session challenged / terminated.";
+    bandDesc = "Critical security degradation (0–50). Session terminated / locked. Fresh re-authentication required.";
     Icon = Lock;
     accessDecision = "BLOCKED";
   }
