@@ -687,15 +687,16 @@ async function seedLandRecordsIntoMongoCollection() {
   if (!mongoDb) return;
 
   const collection = mongoDb.collection<LandRecord>("land_records");
-  const count = await collection.countDocuments({});
-  if (count === 0) {
-    await collection.insertMany(landRecords);
-    console.log(`[MongoDB Atlas] Seeded ${landRecords.length} default land records into Atlas`);
-  } else {
-    const dbRecords = await collection.find({}).toArray();
-    if (dbRecords.length) {
-      landRecords = dbRecords;
+  for (const record of DEFAULT_LAND_RECORDS) {
+    const exists = await collection.findOne({ id: record.id });
+    if (!exists) {
+      await collection.insertOne({ ...record });
+      console.log(`[MongoDB Atlas] Seeded missing land record: ${record.id} (${record.surveyNumber})`);
     }
+  }
+  const dbRecords = await collection.find({}).toArray();
+  if (dbRecords.length) {
+    landRecords = dbRecords;
   }
 }
 
