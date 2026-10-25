@@ -47,13 +47,15 @@ function createMockSession(overrides: Partial<ActiveSession> = {}): ActiveSessio
 test('1. Configurable Trust Thresholds and Risk Levels', () => {
   assert.equal(getRiskLevel(100), RiskLevel.LOW);
   assert.equal(getRiskLevel(85), RiskLevel.LOW);
-  assert.equal(getRiskLevel(80), RiskLevel.LOW);
+  assert.equal(getRiskLevel(81), RiskLevel.LOW);
+  assert.equal(getRiskLevel(80), RiskLevel.MEDIUM);
   assert.equal(getRiskLevel(79), RiskLevel.MEDIUM);
   assert.equal(getRiskLevel(65), RiskLevel.MEDIUM);
-  assert.equal(getRiskLevel(60), RiskLevel.MEDIUM);
-  assert.equal(getRiskLevel(59), RiskLevel.HIGH);
+  assert.equal(getRiskLevel(61), RiskLevel.MEDIUM);
+  assert.equal(getRiskLevel(60), RiskLevel.HIGH);
   assert.equal(getRiskLevel(55), RiskLevel.HIGH);
-  assert.equal(getRiskLevel(40), RiskLevel.HIGH);
+  assert.equal(getRiskLevel(41), RiskLevel.HIGH);
+  assert.equal(getRiskLevel(40), RiskLevel.CRITICAL);
   assert.equal(getRiskLevel(39), RiskLevel.CRITICAL);
   assert.equal(getRiskLevel(20), RiskLevel.CRITICAL);
   assert.equal(getRiskLevel(-1), RiskLevel.CRITICAL);
@@ -70,10 +72,10 @@ test('2. Policy Decision Mapping', () => {
   assert.equal(lowPolicy, "FULL_ACCESS");
 
   const mediumPolicy = getPolicyDecisionForRisk(RiskLevel.MEDIUM);
-  assert.equal(mediumPolicy, "RESTRICTED");
+  assert.equal(mediumPolicy, "READ_ONLY");
 
   const highPolicy = getPolicyDecisionForRisk(RiskLevel.HIGH);
-  assert.equal(highPolicy, "READ_ONLY");
+  assert.equal(highPolicy, "RESTRICTED");
 
   const criticalPolicy = getPolicyDecisionForRisk(RiskLevel.CRITICAL);
   assert.equal(criticalPolicy, "BLOCKED");
@@ -183,8 +185,8 @@ test('6. Role-Based Low-Trust Thresholds for Step-Up Challenge', () => {
   assert.equal(getRoleOtpThreshold("Revenue Inspector (RI)"), 60);
   assert.equal(getRoleOtpThreshold("VAO / Village Officer"), 60);
   assert.equal(getRoleOtpThreshold("Data Entry Operator"), 60);
-  assert.equal(getRoleOtpThreshold("Citizen / Land Owner"), 50);
-  assert.equal(getRoleOtpThreshold("Unknown Officer Role"), trustConfig.thresholds.mediumRiskMin);
+  assert.equal(getRoleOtpThreshold("Citizen / Land Owner"), 60);
+  assert.equal(getRoleOtpThreshold("Unknown Officer Role"), 60);
 });
 
 test('7. NodeMailer OTP Generation and Resilient Delivery', async () => {

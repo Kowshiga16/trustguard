@@ -26,13 +26,8 @@ export default function ThreatSimulator({
 
   const [simulatingOtp, setSimulatingOtp] = useState(false);
 
-  const getRoleThreshold = (roleName: string) => {
-    const norm = (roleName || "").toLowerCase();
-    if (norm.includes("admin")) return 70;
-    if (norm.includes("tahsildar") && !norm.includes("deputy")) return 70;
-    if (norm.includes("deputy")) return 65;
-    if (norm.includes("citizen")) return 50;
-    return 60;
+  const getRoleThreshold = (_roleName: string) => {
+    return 60; // Universal 60 across all roles
   };
 
   const roleThreshold = getRoleThreshold(session.role);

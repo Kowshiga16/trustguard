@@ -321,7 +321,7 @@ async function runAllTests() {
   // ---------------------------------------------------------------------------
   // TEST 11: Critical Trust Degradation & Session Termination
   // ---------------------------------------------------------------------------
-  console.log("\n>>> TEST 11: Critical Trust Degradation (<= 50) triggers TERMINATION...");
+  console.log("\n>>> TEST 11: Critical Trust Degradation (<= 40) triggers TERMINATION...");
   try {
     const adminLogin = await loginUser("admin@trustguard.gov.in");
     const adminToken = adminLogin.session.id;
@@ -330,7 +330,7 @@ async function runAllTests() {
     const officerLogin = await loginUser("balaji.vao@revenue.tn.gov.in");
     const officerToken = officerLogin.session.id;
 
-    // Admin manually degrades officer trust to 40 (Critical Tier <= 50)
+    // Admin manually degrades officer trust to 35 (Critical Tier <= 40)
     const overrideRes = await fetch(`${BASE_URL}/api/admin/override-trust`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: adminToken },
@@ -344,8 +344,8 @@ async function runAllTests() {
     });
     const actionData = await actionRes.json();
 
-    if (actionRes.status === 403 && actionData.decision === "BLOCKED" && actionData.trustScore <= 50) {
-      console.log(`  [PASS] Session terminated. Trust score ${actionData.trustScore} <= 50 correctly locked out by PDP with HTTP 403 BLOCKED.`);
+    if (actionRes.status === 403 && actionData.decision === "BLOCKED" && actionData.trustScore <= 40) {
+      console.log(`  [PASS] Session terminated. Trust score ${actionData.trustScore} <= 40 correctly locked out by PDP with HTTP 403 BLOCKED.`);
       passed++;
     } else {
       console.error("  [FAIL] Expected 403 BLOCKED, got:", actionRes.status, actionData);

@@ -16,9 +16,7 @@ interface OtpVerificationModalProps {
 
 function getRoleThreshold(session?: ActiveSession | null): number {
   if (session?.roleThreshold) return session.roleThreshold;
-  const norm = (session?.role || "").toLowerCase();
-  if (norm.includes("citizen")) return 50;
-  return 60;
+  return 60; // Universal 60 across all roles
 }
 
 export default function OtpVerificationModal({
@@ -37,13 +35,13 @@ export default function OtpVerificationModal({
 
   const roleThreshold = getRoleThreshold(session);
 
-  const isBlocked = Boolean(session && (session.currentTrustScore <= 50 || session.status === "Blocked"));
-  const isScoreInChallengeRange = Boolean(session && session.currentTrustScore > 50 && session.currentTrustScore <= roleThreshold);
+  const isBlocked = Boolean(session && (session.currentTrustScore <= 40 || session.status === "Blocked"));
+  const isScoreInChallengeRange = Boolean(session && session.currentTrustScore >= 41 && session.currentTrustScore <= roleThreshold);
   const isOtpNeeded = Boolean(
     session &&
     !session.otpVerified &&
     !isBlocked &&
-    (isScoreInChallengeRange || (Boolean((session as any).requiresOtp) && session.currentTrustScore > 50))
+    (isScoreInChallengeRange || (Boolean((session as any).requiresOtp) && session.currentTrustScore > 40))
   );
 
   const hasRequestedRef = React.useRef<string | null>(null);

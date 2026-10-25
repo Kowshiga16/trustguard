@@ -26,10 +26,10 @@ export enum AccessMode {
 }
 
 export interface TrustThresholds {
-  lowRiskMin: number;     // 80–100: Full Access, OTP not required
-  mediumRiskMin: number;  // 60–79: Restricted mode, OTP required for sensitive actions
-  highRiskMin: number;    // 40–59: Read-Only mode, sensitive actions blocked
-  criticalMax: number;    // < 40: Critical risk, access blocked / session challenged
+  lowRiskMin: number;     // 81–100: Full Access, OTP not required
+  mediumRiskMin: number;  // 61–80: Read-Only mode, sensitive write actions locked
+  highRiskMin: number;    // 41–60: Step-Up OTP generation tier
+  criticalMax: number;    // <= 40: Critical risk, access blocked / logout
 }
 
 export interface RiskDeductionsConfig {
@@ -78,10 +78,10 @@ export interface MlConfig {
 export const trustConfig = {
   // 1. Centralized Trust Score Thresholds
   thresholds: {
-    lowRiskMin: parseInt(process.env.TRUST_THRESHOLD_LOW_MIN || "80", 10),      // 80–100: LOW RISK / FULL ACCESS
-    mediumRiskMin: parseInt(process.env.TRUST_THRESHOLD_MEDIUM_MIN || "60", 10), // 60–79: MEDIUM RISK / RESTRICTED
-    highRiskMin: parseInt(process.env.TRUST_THRESHOLD_HIGH_MIN || "40", 10),    // 40–59: HIGH RISK / READ-ONLY
-    criticalMax: parseInt(process.env.TRUST_THRESHOLD_CRITICAL_MAX || "40", 10), // < 40: CRITICAL / BLOCKED
+    lowRiskMin: parseInt(process.env.TRUST_THRESHOLD_LOW_MIN || "81", 10),      // 81–100: LOW RISK / FULL ACCESS
+    mediumRiskMin: parseInt(process.env.TRUST_THRESHOLD_MEDIUM_MIN || "61", 10), // 61–80: MEDIUM RISK / READ-ONLY
+    highRiskMin: parseInt(process.env.TRUST_THRESHOLD_HIGH_MIN || "41", 10),    // 41–60: HIGH RISK / STEP-UP OTP
+    criticalMax: parseInt(process.env.TRUST_THRESHOLD_CRITICAL_MAX || "40", 10), // <= 40: CRITICAL / BLOCKED / LOGOUT
   } as TrustThresholds,
 
   // 2. Centralized Explainable Risk Deductions
@@ -137,7 +137,7 @@ export const trustConfig = {
     weight: parseFloat(process.env.ML_SCORE_WEIGHT || "0.25"),
   } as MlConfig,
 
-  // 7. Role-Specific Low Trust Challenge Baseline
+  // 7. Role-Specific Low Trust Challenge Baseline (Universal 60 for all logins & users)
   roleOtpThresholds: {
     "System Administrator": parseInt(process.env.OTP_THRESHOLD_ADMIN || "60", 10),
     "Tahsildar": parseInt(process.env.OTP_THRESHOLD_TAHSILDAR || "60", 10),
@@ -145,16 +145,16 @@ export const trustConfig = {
     "Revenue Inspector (RI)": parseInt(process.env.OTP_THRESHOLD_RI || "60", 10),
     "VAO / Village Officer": parseInt(process.env.OTP_THRESHOLD_VAO || "60", 10),
     "Data Entry Operator": parseInt(process.env.OTP_THRESHOLD_DEO || "60", 10),
-    "Citizen / Land Owner": parseInt(process.env.OTP_THRESHOLD_CITIZEN || "50", 10),
+    "Citizen / Land Owner": parseInt(process.env.OTP_THRESHOLD_CITIZEN || "60", 10),
   } as Record<string, number>
 };
 
 /**
  * Determine the Risk Level based on centralized trust score thresholds:
- *   80–100: LOW
- *   60–79:  MEDIUM
- *   40–59:  HIGH
- *   < 40:   CRITICAL
+ *   81–100: LOW (Full Access)
+ *   61–80:  MEDIUM (Read-Only Mode)
+ *   41–60:  HIGH (Step-Up OTP Challenge)
+ *   <= 40:  CRITICAL (Session Terminated / Logout)
  */
 export function getRiskLevel(score: number): RiskLevel {
   const { lowRiskMin, mediumRiskMin, highRiskMin } = trustConfig.thresholds;
@@ -166,10 +166,10 @@ export function getRiskLevel(score: number): RiskLevel {
 
 /**
  * Determine the Access Mode based on centralized policy:
- *   80–100: FULL (OTP not required)
- *   60–79:  RESTRICTED (OTP required for sensitive write actions / approvals)
- *   40–59:  READ-ONLY (sensitive actions blocked, OTP required to restore)
- *   < 40:   BLOCKED (session challenged/terminated)
+ *   81–100: FULL (Full Access, OTP not required)
+ *   61–80:  READ_ONLY (Read-Only mode, sensitive write actions locked)
+ *   41–60:  RESTRICTED (Step-Up OTP Challenge required)
+ *   <= 40:  BLOCKED (Session Terminated / Logout)
  */
 export function getAccessModeForScore(score: number): AccessMode {
   const risk = getRiskLevel(score);
@@ -177,9 +177,9 @@ export function getAccessModeForScore(score: number): AccessMode {
     case RiskLevel.LOW:
       return AccessMode.FULL;
     case RiskLevel.MEDIUM:
-      return AccessMode.RESTRICTED;
-    case RiskLevel.HIGH:
       return AccessMode.READ_ONLY;
+    case RiskLevel.HIGH:
+      return AccessMode.RESTRICTED;
     case RiskLevel.CRITICAL:
       return AccessMode.BLOCKED;
   }
@@ -190,9 +190,9 @@ export function getPolicyDecisionForRisk(riskLevel: RiskLevel): string {
     case RiskLevel.LOW:
       return "FULL_ACCESS";
     case RiskLevel.MEDIUM:
-      return "RESTRICTED";
-    case RiskLevel.HIGH:
       return "READ_ONLY";
+    case RiskLevel.HIGH:
+      return "RESTRICTED";
     case RiskLevel.CRITICAL:
       return "BLOCKED";
     default:
@@ -244,9 +244,10 @@ export function getRoleDocumentPolicy(role: string): RoleDocumentPolicy {
 
 /**
  * Returns the configurable low-trust OTP challenge threshold for a given user role.
+ * Universal 60 across all roles for 41–60 OTP Challenge tier.
  */
 export function getRoleOtpThreshold(role: string): number {
-  if (!role) return trustConfig.thresholds.mediumRiskMin;
+  if (!role) return 60;
   
   if (trustConfig.roleOtpThresholds[role] !== undefined) {
     return trustConfig.roleOtpThresholds[role];
@@ -260,13 +261,5 @@ export function getRoleOtpThreshold(role: string): number {
     }
   }
 
-  if (normalized.includes("admin")) return trustConfig.roleOtpThresholds["System Administrator"] || 60;
-  if (normalized.includes("deputy") || normalized.includes("dt")) return trustConfig.roleOtpThresholds["Deputy Tahsildar"] || 60;
-  if (normalized.includes("tahsildar")) return trustConfig.roleOtpThresholds["Tahsildar"] || 60;
-  if (normalized.includes("vao") || normalized.includes("village")) return trustConfig.roleOtpThresholds["VAO / Village Officer"] || 60;
-  if (normalized.includes("ri") || normalized.includes("inspector")) return trustConfig.roleOtpThresholds["Revenue Inspector (RI)"] || 60;
-  if (normalized.includes("deo") || normalized.includes("data entry")) return trustConfig.roleOtpThresholds["Data Entry Operator"] || 60;
-  if (normalized.includes("citizen")) return trustConfig.roleOtpThresholds["Citizen / Land Owner"] || 50;
-
-  return trustConfig.thresholds.mediumRiskMin; // default 60
+  return 60; // 60 for all logins and users
 }
