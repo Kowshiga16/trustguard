@@ -92,23 +92,23 @@ test("Scenario 2: Security event triggers -> trust score updates dynamically", a
   assert.equal(session.currentTrustScore, 80, "Session currentTrustScore must be updated to 80");
 });
 
-test("Scenario 3: Score 61–80 -> Read-Only Mode (View allowed, writes blocked on backend)", async () => {
+test("Scenario 3: Score 61–75 -> Read-Only Mode (View allowed, writes blocked on backend)", async () => {
   const session = createTestSession({ currentTrustScore: 70 });
-  const isReadOnly = session.currentTrustScore >= 61 && session.currentTrustScore <= 80;
+  const isReadOnly = session.currentTrustScore >= 61 && session.currentTrustScore <= 75;
   assert.equal(isReadOnly, true, "Trust score 70 must be classified as Read-Only mode");
   
   // Simulation: sensitive write action attempt in Read-Only tier
   const isSensitiveWrite = true;
-  const shouldBlockWrite = (session.currentTrustScore >= 61 && session.currentTrustScore <= 80 && isSensitiveWrite);
-  assert.equal(shouldBlockWrite, true, "Sensitive write operations must be blocked in Read-Only tier (61–80)");
+  const shouldBlockWrite = (session.currentTrustScore >= 61 && session.currentTrustScore <= 75 && isSensitiveWrite);
+  assert.equal(shouldBlockWrite, true, "Sensitive write operations must be blocked in Read-Only tier (61–75)");
 });
 
-test("Scenario 4: Score 41–60 -> Step-Up OTP challenge triggered automatically", async () => {
+test("Scenario 4: Score 51–60 -> Step-Up OTP challenge triggered automatically", async () => {
   const session = createTestSession({ currentTrustScore: 55, otpVerified: false });
   const roleThreshold = getRoleOtpThreshold(session.role);
   
-  const inChallengeRange = session.currentTrustScore >= 41 && session.currentTrustScore <= roleThreshold;
-  assert.equal(inChallengeRange, true, "Score 55 is in the 41–60 challenge range");
+  const inChallengeRange = session.currentTrustScore > 50 && session.currentTrustScore <= roleThreshold;
+  assert.equal(inChallengeRange, true, "Score 55 is in the 51–60 challenge range");
   
   const needsOtp = !session.otpVerified && inChallengeRange;
   assert.equal(needsOtp, true, "Step-Up OTP challenge must be triggered");
@@ -138,10 +138,10 @@ test("Scenario 6: Invalid OTP -> access remains restricted", async () => {
   assert.equal(session.failedActionCount, 1, "failedActionCount must be incremented");
 });
 
-test("Scenario 7: Score 40 and below -> Session Terminated / Blocked (fresh login required)", async () => {
+test("Scenario 7: Score 0–50 -> Session Terminated / Blocked (fresh login required)", async () => {
   const session = createTestSession({ currentTrustScore: 40 });
-  const isBlocked = session.currentTrustScore <= 40;
-  assert.equal(isBlocked, true, "Score <= 40 must be classified as Blocked / Terminated");
+  const isBlocked = session.currentTrustScore <= 50;
+  assert.equal(isBlocked, true, "Score <= 50 must be classified as Blocked / Terminated");
   
   session.status = "Blocked";
   session.requiresOtp = false; // Blocked sessions require fresh login, not OTP form
@@ -181,7 +181,7 @@ test("Scenario 10: Multiple roles -> each role follows configured thresholds", (
     { name: RoleName.RevenueInspector, threshold: 60 },
     { name: RoleName.VillageAdministrativeOfficer, threshold: 60 },
     { name: RoleName.DataEntryOperator, threshold: 60 },
-    { name: RoleName.Citizen, threshold: 60 },
+    { name: RoleName.Citizen, threshold: 50 },
   ];
   
   for (const { name, threshold } of roles) {
@@ -191,14 +191,14 @@ test("Scenario 10: Multiple roles -> each role follows configured thresholds", (
 });
 
 test("Scenario 11: Forbidden write operation -> backend rejects in read-only and blocked states", () => {
-  // Read-only state (score 70)
-  const readOnlyScore = 70;
-  const isReadOnly = readOnlyScore >= 61 && readOnlyScore <= 80;
+  // Read-only state (score 65)
+  const readOnlyScore = 65;
+  const isReadOnly = readOnlyScore >= 61 && readOnlyScore <= 75;
   assert.equal(isReadOnly, true);
   
-  // Blocked state (score 35)
-  const blockedScore = 35;
-  const isBlocked = blockedScore <= 40;
+  // Blocked state (score 45)
+  const blockedScore = 45;
+  const isBlocked = blockedScore <= 50;
   assert.equal(isBlocked, true);
 });
 

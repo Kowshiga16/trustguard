@@ -79,8 +79,8 @@ export default function RecordsPortal({
 
   if (!session) return null;
 
-  const isReadOnly = session.currentTrustScore <= 80;
-  const isRestricted = session.currentTrustScore >= 61 && session.currentTrustScore <= 80;
+  const isReadOnly = session.currentTrustScore <= 75;
+  const isRestricted = session.currentTrustScore >= 60 && session.currentTrustScore <= 75;
   const isDEO = session.role === RoleName.DataEntryOperator;
   const isCitizen = session.role === RoleName.Citizen;
   const isAdmin = session.role === RoleName.SystemAdministrator;

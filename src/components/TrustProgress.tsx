@@ -24,7 +24,7 @@ export default function TrustProgress({ session, onSessionUpdate }: TrustProgres
             onSessionUpdate?.({
               ...session,
               currentTrustScore: data.finalTrustScore,
-              status: data.finalTrustScore <= 40 ? "Blocked" : "Active"
+              status: data.finalTrustScore <= 50 ? "Blocked" : "Active"
             });
           }
         }
@@ -48,28 +48,28 @@ export default function TrustProgress({ session, onSessionUpdate }: TrustProgres
   let Icon = HelpCircle;
   let accessDecision = "UNKNOWN";
 
-  if (score >= 81) {
+  if (score >= 76) {
     bandName = "Full Access Tier";
     bandColor = "bg-emerald-950/30 text-emerald-300 border-emerald-900/40";
-    bandDesc = "Optimal zero trust posture (81–100). Full access to role-permitted features, records viewing, mutations, and approvals.";
+    bandDesc = "Optimal zero trust posture (76–100). Full access to role-permitted features, records viewing, mutations, and approvals.";
     Icon = ShieldCheck;
     accessDecision = "FULL";
   } else if (score >= 61) {
     bandName = "Read-Only Mode";
     bandColor = "bg-amber-950/30 text-amber-300 border-amber-900/40";
-    bandDesc = "Elevated session risk (61–80). Authorized records are viewable. Creating, editing, approving, or submitting records is locked.";
+    bandDesc = "Elevated session risk (61–75). Authorized records are viewable. Creating, editing, approving, or submitting records is locked.";
     Icon = ShieldAlert;
     accessDecision = "READ-ONLY";
-  } else if (score >= 41) {
+  } else if (score >= 51) {
     bandName = "MFA / Step-Up OTP Challenge";
     bandColor = "bg-orange-950/30 text-orange-300 border-orange-900/40";
-    bandDesc = "Step-Up verification threshold triggered (41–60). One-time passcode verification required to restore access.";
+    bandDesc = "Step-Up verification threshold triggered (51–60). One-time passcode verification required to restore access.";
     Icon = Shield;
     accessDecision = "STEP-UP OTP";
   } else {
     bandName = "Session Terminated / Blocked";
     bandColor = "bg-rose-950/30 text-rose-300 border-rose-900/40";
-    bandDesc = "Critical security degradation (40 and below). Session terminated / locked. Fresh re-authentication required.";
+    bandDesc = "Critical security degradation (0–50). Session terminated / locked. Fresh re-authentication required.";
     Icon = Lock;
     accessDecision = "BLOCKED";
   }
@@ -98,7 +98,7 @@ export default function TrustProgress({ session, onSessionUpdate }: TrustProgres
                 strokeDasharray={circumference}
                 strokeDashoffset={offset}
                 strokeLinecap="round"
-                className={`transition-all duration-500 ${score >= 81 ? "stroke-emerald-500" : score >= 61 ? "stroke-amber-500" : score >= 41 ? "stroke-orange-500" : "stroke-rose-500"}`}
+                className={`transition-all duration-500 ${score >= 80 ? "stroke-emerald-500" : score >= 60 ? "stroke-amber-500" : score >= 40 ? "stroke-orange-500" : "stroke-rose-500"}`}
                 strokeWidth="6" fill="transparent"
               />
             </svg>

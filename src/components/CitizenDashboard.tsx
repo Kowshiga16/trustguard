@@ -40,7 +40,7 @@ export default function CitizenDashboard({ session, users, villages, records, ap
   const [viewingDoc, setViewingDoc] = useState<any>(null);
   const [securityNotice, setSecurityNotice] = useState<{ message: string; type: "error" | "success" } | null>(null);
   const [inspectingDocId, setInspectingDocId] = useState<string | null>(null);
-  const isReadOnly = session.currentTrustScore <= 80;
+  const isReadOnly = session.currentTrustScore <= 75;
 
   const handleInspectDocument = async (recordId: string, ownerName: string) => {
     setInspectingDocId(recordId);
@@ -73,7 +73,7 @@ export default function CitizenDashboard({ session, users, villages, records, ap
             ...session,
             currentTrustScore: data.trustScore,
             failedActionCount: (session.failedActionCount || 0) + 1,
-            status: data.trustScore <= 40 ? "Blocked" : session.status
+            status: data.trustScore < 40 ? "Blocked" : session.status
           });
         }
       }
@@ -91,7 +91,7 @@ export default function CitizenDashboard({ session, users, villages, records, ap
   const submitApplication = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isReadOnly) {
-      setError("Write operations locked: Session is in Read-Only Mode (Trust Score: 61–80). Applications cannot be submitted.");
+      setError("Write operations locked: Session is in Read-Only Mode (Trust Score: 61–75). Applications cannot be submitted.");
       return;
     }
     setLoading(true);

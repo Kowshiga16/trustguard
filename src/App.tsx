@@ -938,18 +938,8 @@ export default function App() {
     );
   }
 
-  // PDP ENFORCED SUSPENSION LOCK SCREEN (Policy Tier: 40 and below: Blocked / Terminated / Logout)
-  const isBlocked = Boolean(session && (session.currentTrustScore <= 40 || session.status === "Blocked"));
-
-  // Auto-logout when trust score reaches 40 and below
-  useEffect(() => {
-    if (session && (session.currentTrustScore <= 40 || session.status === "Blocked")) {
-      const timer = setTimeout(() => {
-        handleLogout();
-      }, 2500);
-      return () => clearTimeout(timer);
-    }
-  }, [session?.id, session?.currentTrustScore, session?.status]);
+  // PDP ENFORCED SUSPENSION LOCK SCREEN (Policy Tier: 0–50 Blocked / Terminated)
+  const isBlocked = Boolean(session && (session.currentTrustScore <= 50 || session.status === "Blocked"));
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col text-slate-700 font-sans w-full max-w-full overflow-x-hidden">
@@ -967,7 +957,7 @@ export default function App() {
             </div>
             
             <p className="text-slate-400 leading-relaxed text-[11px] font-sans font-medium">
-              Your active session has been terminated/locked due to critical trust degradation. The trust engine computed your dynamic posture score to be <b>{session.currentTrustScore}/100</b>, falling into the blocked tier (40 and below). Fresh re-authentication is required to access protected resources.
+              Your active session has been terminated/locked due to critical trust degradation. The trust engine computed your dynamic posture score to be <b>{session.currentTrustScore}/100</b>, falling into the blocked tier (0–50). Fresh re-authentication is required to access protected resources.
             </p>
 
             <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 text-left w-full space-y-1.5 text-[10px]">
@@ -1042,8 +1032,8 @@ export default function App() {
             </div>
           )}
 
-          {/* Read-Only Mode Notification Banner (Policy Tier: 61–80) */}
-          {session.currentTrustScore >= 61 && session.currentTrustScore <= 80 && (
+          {/* Read-Only Mode Notification Banner (Requirement 2.B: Policy Tier 61–75) */}
+          {session.currentTrustScore >= 61 && session.currentTrustScore <= 75 && (
             <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-xl shadow-xs flex items-start gap-3.5 border border-amber-200/60">
               <ShieldAlert className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
               <div className="flex-1">
@@ -1052,7 +1042,7 @@ export default function App() {
                     <span>Read-Only Mode Active</span>
                   </h4>
                   <span className="text-[10px] font-mono bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded font-extrabold border border-amber-300">
-                    Policy Tier: 61–80
+                    Policy Tier: 61–75
                   </span>
                 </div>
                 <p className="text-xs text-amber-800 mt-1">
@@ -1236,11 +1226,11 @@ export default function App() {
                                 <td className="py-3 px-4 font-sans">{s.role}</td>
                                 <td className="py-3 px-4">{s.currentRequestIp || s.ipAddress}</td>
                                 <td className={`py-3 px-4 font-extrabold ${
-                                  s.currentTrustScore >= 81 
+                                  s.currentTrustScore >= 76 
                                     ? "text-emerald-600" 
                                     : s.currentTrustScore >= 61 
                                     ? "text-amber-600" 
-                                    : s.currentTrustScore >= 41 
+                                    : s.currentTrustScore >= 51 
                                     ? "text-orange-600" 
                                     : "text-rose-600"
                                 }`}>

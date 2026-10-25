@@ -124,7 +124,7 @@ class TrustEngine {
     const previousScore = session.currentTrustScore ?? 100;
 
     // If session is already critically blocked and unverified, preserve blocked state
-    if (session.status === "Blocked" && !session.otpVerified && previousScore <= trustConfig.thresholds.criticalMax) {
+    if (session.status === "Blocked" && !session.otpVerified && previousScore < trustConfig.thresholds.criticalMax) {
       session.currentTrustScore = Math.min(session.currentTrustScore, 35);
       return {
         previousScore,
@@ -159,10 +159,10 @@ class TrustEngine {
     session.currentTrustScore = finalScore;
     session.lastActivityTime = new Date().toISOString();
 
-    // Enforce session status based on centralized thresholds (40 and below: Blocked)
-    if (finalScore <= trustConfig.thresholds.criticalMax) { // <= 40: Critical Risk / Blocked
+    // Enforce session status based on centralized thresholds
+    if (finalScore < trustConfig.thresholds.criticalMax) { // < 40: Critical Risk / Blocked
       session.status = "Blocked";
-    } else if (session.status === "Blocked" && finalScore > trustConfig.thresholds.criticalMax) {
+    } else if (session.status === "Blocked" && finalScore >= trustConfig.thresholds.criticalMax) {
       session.status = "Active";
     }
 

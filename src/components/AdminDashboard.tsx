@@ -43,7 +43,7 @@ export default function AdminDashboard({ session, users, villages, auditLogs, tr
   const [updatingAlertId, setUpdatingAlertId] = useState<string | null>(null);
   const [resolutionNote, setResolutionNote] = useState("");
   const [selectedAlertForNote, setSelectedAlertForNote] = useState<string | null>(null);
-  const isReadOnly = session.currentTrustScore <= 80;
+  const isReadOnly = session.currentTrustScore <= 75;
 
   const fetchAlerts = async () => {
     try {
@@ -111,7 +111,7 @@ export default function AdminDashboard({ session, users, villages, auditLogs, tr
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (isReadOnly) {
-      setError("User creation locked: Session is in Read-Only Mode (Trust Score: 61–80).");
+      setError("User creation locked: Session is in Read-Only Mode (Trust Score: 61–75).");
       return;
     }
     setError("");

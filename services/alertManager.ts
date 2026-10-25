@@ -158,8 +158,8 @@ class AlertManager {
     const absoluteDrop = Math.abs(scoreDiff);
     const isSignificantDrop = absoluteDrop >= trustConfig.alertPolicy.significantDropThreshold && isRiskLevelAlertable(currentRisk);
 
-    // 4. Critical security event (e.g. score <= 40, or both device & IP mismatch, or blocked status)
-    const isCriticalEvent = currentScore <= trustConfig.thresholds.criticalMax || 
+    // 4. Critical security event (e.g. score < 20, or both device & IP mismatch, or blocked status)
+    const isCriticalEvent = currentScore < trustConfig.thresholds.criticalMax || 
       (session.simulatedDeviceMismatch && session.simulatedIpMismatch);
 
     const qualifiesForAlert = crossedIntoAlertableTier || escalatedWorseRisk || isSignificantDrop || isCriticalEvent;

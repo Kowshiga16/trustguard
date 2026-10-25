@@ -1106,9 +1106,9 @@ function logTrustChange(session: ActiveSession, eventType: string, previousScore
       actionPerformed: `TRUST_SCORE_DROP: ${eventType}`,
       resourceAccessed: "TRUST_ENGINE",
       trustScoreAtAction: currentScore,
-      decision: currentScore <= trustConfig.thresholds.criticalMax 
+      decision: currentScore < trustConfig.thresholds.criticalMax 
         ? "TERMINATED" 
-        : (currentScore <= 60 && currentScore >= 41 ? "STEP-UP OTP" : "ALLOWED"),
+        : (currentScore < trustConfig.thresholds.lowRiskMin ? "STEP-UP OTP" : "ALLOWED"),
       timestamp: new Date().toISOString(),
       previousTrustScore: previousScore,
       currentTrustScore: currentScore,
@@ -1133,7 +1133,7 @@ async function updateSessionTrust(
   const user = users.find(u => u.id === session.userId);
   const evaluation = await trustEngine.evaluateSessionTrust(session, eventType, user, reqResource);
 
-  if (eventType !== "OTP Identity Step-Up Succeeded" && session.otpVerified && evaluation.finalScore <= criticalThreshold) {
+  if (eventType !== "OTP Identity Step-Up Succeeded" && session.otpVerified && evaluation.finalScore < criticalThreshold) {
     session.otpVerified = false;
     sessionOtpCodes.delete(session.id);
   }
@@ -1148,16 +1148,16 @@ async function updateSessionTrust(
     recordSecurityAlert(evaluation.securityAlert);
   }
 
-  // If final trust score dropped into OTP tier (41–60) and session is not verified,
-  // challenge session with Step-Up OTP.
-  // If score is <= 40, enforce Blocked status without OTP challenge (Logout).
+  // If final trust score dropped to or below role threshold and session is not verified,
+  // challenge session with Step-Up OTP (51–60 tier).
+  // If score is <= 50, enforce Blocked status without OTP challenge.
   const roleThreshold = getRoleOtpThreshold(session.role);
-  if (evaluation.finalScore <= 40) {
+  if (evaluation.finalScore <= 50) {
     session.status = "Blocked";
     session.requiresOtp = false;
   } else if (
     evaluation.finalScore <= roleThreshold &&
-    evaluation.finalScore >= 41 &&
+    evaluation.finalScore > 50 &&
     !session.otpVerified &&
     eventType !== "OTP Identity Step-Up Succeeded"
   ) {
@@ -1268,13 +1268,13 @@ async function startServer() {
       session.lastActivityTime = new Date().toISOString();
       sessionActivityTracker.recordRequest(session.id);
 
-      if ((session.status === "Blocked" || session.currentTrustScore <= 40) && !session.otpVerified) {
+      if ((session.status === "Blocked" || session.currentTrustScore <= 50) && !session.otpVerified) {
         session.status = "Blocked";
         session.requiresOtp = false;
         return res.status(403).json({
           error: "blocked",
           decision: "BLOCKED",
-          message: `Your session has been terminated/locked due to critical trust degradation (Trust Score ${session.currentTrustScore} <= 40). Fresh re-authentication required.`,
+          message: `Your session has been terminated/locked due to critical trust degradation (Trust Score ${session.currentTrustScore} <= 50). Fresh re-authentication required.`,
           trustScore: session.currentTrustScore,
           riskLevel: getRiskLevel(session.currentTrustScore),
           accessMode: "BLOCKED"
@@ -1342,8 +1342,8 @@ async function startServer() {
         });
       }
 
-      // A. CRITICAL RISK / SESSION TERMINATION: <= 40 -> BLOCKED (Logout)
-      if (computedScore <= 40 || session.status === "Blocked") {
+      // A. CRITICAL RISK / SESSION TERMINATION: 0–50 -> BLOCKED
+      if (computedScore <= 50 || session.status === "Blocked") {
         session.status = "Blocked";
         session.requiresOtp = false;
         const audit: AuditLog = {
@@ -1362,7 +1362,7 @@ async function startServer() {
           reasons: evaluation.reasons,
           ipAddress: session.ipAddress,
           device: session.deviceFingerprint,
-          policyAction: "Session Terminated due to Security Policy Violation (Trust Score <= 40)",
+          policyAction: "Session Terminated due to Security Policy Violation (Trust Score <= 50)",
           ruleRisk: hr.ruleRisk, ruleTrust: hr.ruleTrust,
           isolationForestScore: hr.isolationForestScore, normalizedAnomalyScore: hr.normalizedAnomalyScore,
           mlRisk: hr.mlRisk, finalTrustScore: hr.finalTrustScore, accessDecision: "BLOCKED", mlStatus: hr.mlServiceStatus
@@ -1371,16 +1371,16 @@ async function startServer() {
         return res.status(403).json({ 
           error: "blocked", 
           decision: "BLOCKED",
-          message: `Your session has been terminated/locked due to critical trust degradation (Trust Score ${computedScore} <= 40). Fresh re-authentication required.`,
+          message: `Your session has been terminated/locked due to critical trust degradation (Trust Score ${computedScore} <= 50). Fresh re-authentication required.`,
           trustScore: computedScore,
           riskLevel: evaluation.riskLevel,
           accessMode: "BLOCKED"
         });
       }
 
-      // B. STEP-UP OTP CHALLENGE: 41–60
+      // B. STEP-UP OTP CHALLENGE: 51–60
       const roleThreshold = getRoleOtpThreshold(session.role);
-      if (computedScore >= 41 && computedScore <= roleThreshold && !session.otpVerified) {
+      if (computedScore > 50 && computedScore <= roleThreshold && !session.otpVerified) {
         session.requiresOtp = true;
         const activeOtp = sessionOtpCodes.get(session.id);
         if (!activeOtp || Date.now() >= activeOtp.expiresAt) {
@@ -1403,7 +1403,7 @@ async function startServer() {
             reasons: evaluation.reasons,
             ipAddress: session.ipAddress,
             device: session.deviceFingerprint,
-            policyAction: `Step-Up OTP Verification Required for sensitive operation in OTP Challenge tier (41–60)`,
+            policyAction: `Step-Up OTP Verification Required for sensitive operation in OTP Challenge tier (51–60)`,
             ruleRisk: hr.ruleRisk, ruleTrust: hr.ruleTrust,
             isolationForestScore: hr.isolationForestScore, normalizedAnomalyScore: hr.normalizedAnomalyScore,
             mlRisk: hr.mlRisk, finalTrustScore: hr.finalTrustScore, accessDecision: "RESTRICTED", mlStatus: hr.mlServiceStatus
@@ -1420,9 +1420,9 @@ async function startServer() {
         }
       }
 
-      // C. READ-ONLY MODE: 61–80
+      // C. READ-ONLY MODE: 61–75
       // Viewing documents is permitted; write/edit/delete/approve is blocked!
-      if (computedScore >= 61 && computedScore <= 80 && isSensitiveWrite) {
+      if (computedScore >= 61 && computedScore <= 75 && isSensitiveWrite) {
         session.failedActionCount = (session.failedActionCount || 0) + 1;
         await updateSessionTrust(session, "Unauthorized Write Attempt in Read-Only Mode", req.path);
 
@@ -1439,10 +1439,10 @@ async function startServer() {
           previousTrustScore: computedScore,
           currentTrustScore: session.currentTrustScore,
           riskLevel: evaluation.riskLevel,
-          reasons: ["Attempted write/approval operation in Read-Only Trust tier (61–80)"],
+          reasons: ["Attempted write/approval operation in Read-Only Trust tier (61–75)"],
           ipAddress: session.ipAddress,
           device: session.deviceFingerprint,
-          policyAction: `Write operation denied. Session is in READ-ONLY mode (Trust Score 61–80). Complete OTP verification or restore posture to enable write privileges.`,
+          policyAction: `Write operation denied. Session is in READ-ONLY mode (Trust Score 61–75). Complete OTP verification or restore posture to enable write privileges.`,
           ruleRisk: hr.ruleRisk, ruleTrust: hr.ruleTrust,
           isolationForestScore: hr.isolationForestScore, normalizedAnomalyScore: hr.normalizedAnomalyScore,
           mlRisk: hr.mlRisk, finalTrustScore: hr.finalTrustScore, accessDecision: "READ_ONLY", mlStatus: hr.mlServiceStatus
@@ -1899,10 +1899,10 @@ async function startServer() {
       "/api/auth/login"
     );
 
-    if (newSession.currentTrustScore <= 40) {
+    if (newSession.currentTrustScore <= 50) {
       newSession.status = "Blocked";
       newSession.requiresOtp = false;
-    } else if (newSession.currentTrustScore <= roleThreshold && newSession.currentTrustScore >= 41) {
+    } else if (newSession.currentTrustScore <= roleThreshold && newSession.currentTrustScore > 50) {
       newSession.requiresOtp = true;
     } else {
       newSession.requiresOtp = false;
@@ -2002,21 +2002,21 @@ async function startServer() {
     const evaluation = await trustEngine.evaluateSessionTrust(session, "Real-time Telemetry Polling", user, "/api/auth/current-session");
 
     // Enforce role-aware policy tiers:
-    // 0–40: Blocked (Session Terminated / Logout)
-    // 41–60: MFA / Step-Up OTP Challenge
-    // 61–80: Read-Only Mode
-    // 81–100: Full Access Tier
+    // 0–50: Blocked (Session Terminated)
+    // 51–60: MFA / Step-Up OTP Challenge
+    // 61–75: Read-Only Mode
+    // 76–100: Full Access Tier
     const roleThreshold = getRoleOtpThreshold(session.role);
-    if (session.currentTrustScore <= 40) {
+    if (session.currentTrustScore <= 50) {
       session.status = "Blocked";
       session.requiresOtp = false;
-    } else if (session.currentTrustScore <= roleThreshold && session.currentTrustScore >= 41 && !session.otpVerified) {
+    } else if (session.currentTrustScore <= roleThreshold && session.currentTrustScore > 50 && !session.otpVerified) {
       session.requiresOtp = true;
       const activeOtp = sessionOtpCodes.get(session.id);
       if (!activeOtp || Date.now() >= activeOtp.expiresAt) {
         void issueOtpForSession(
           session,
-          `Dynamic Zero Trust Telemetry: Score (${session.currentTrustScore}) dropped into OTP challenge tier (${roleThreshold})`
+          `Dynamic Zero Trust Telemetry: Score (${session.currentTrustScore}) dropped below threshold (${roleThreshold})`
         );
       }
     } else {
@@ -2147,8 +2147,8 @@ async function startServer() {
     let activeOtp = sessionOtpCodes.get(session.id);
     let isExpired = activeOtp ? Date.now() >= activeOtp.expiresAt : true;
 
-    // Automatically generate and dispatch OTP if trust score has crossed below role threshold into OTP tier (41–60)
-    if (session.currentTrustScore <= roleThreshold && session.currentTrustScore >= 41 && !session.otpVerified && (!activeOtp || isExpired)) {
+    // Automatically generate and dispatch OTP if trust score has crossed below role threshold into OTP tier (51–60)
+    if (session.currentTrustScore <= roleThreshold && session.currentTrustScore > 50 && !session.otpVerified && (!activeOtp || isExpired)) {
       await issueOtpForSession(session, `Dynamic Zero Trust Step-Up (Score ${session.currentTrustScore} <= ${roleThreshold})`);
       activeOtp = sessionOtpCodes.get(session.id);
       isExpired = false;
@@ -2161,7 +2161,7 @@ async function startServer() {
       role: session.role,
       roleThreshold,
       currentTrustScore: session.currentTrustScore,
-      otpRequired: session.currentTrustScore <= roleThreshold && session.currentTrustScore >= 41 && !session.otpVerified,
+      otpRequired: session.currentTrustScore <= roleThreshold && session.currentTrustScore > 50 && !session.otpVerified,
       otpVerified: session.otpVerified,
       hasActiveOtp: !isExpired,
       recipientEmail: maskEmail(activeOtp?.userEmail || recipientEmail),
@@ -2492,7 +2492,7 @@ async function startServer() {
           revenueInspector: 60,
           vao: 60,
           dataEntryOperator: 60,
-          citizen: 60
+          citizen: 50
         }
       },
       diagnosticAdvice: !brevoApiKey && isProduction
@@ -2651,9 +2651,9 @@ async function startServer() {
         const hr = evaluation.hybridResult;
         const observedIp = extractClientIp(req);
 
-        // Step-Up OTP challenge if trust score dropped below role threshold into OTP tier (41–60)
+        // Step-Up OTP challenge if trust score dropped below role threshold into OTP tier (51–60)
         const roleThreshold = getRoleOtpThreshold(session.role);
-        if (session.currentTrustScore <= roleThreshold && session.currentTrustScore >= 41 && !session.otpVerified) {
+        if (session.currentTrustScore <= roleThreshold && session.currentTrustScore > 50 && !session.otpVerified) {
           const activeOtp = sessionOtpCodes.get(session.id);
           if (!activeOtp || Date.now() >= activeOtp.expiresAt) {
             void issueOtpForSession(
@@ -2778,9 +2778,9 @@ async function startServer() {
         const evaluation = await trustEngine.evaluateSessionTrust(session, evalEventDesc, user, req.path);
         const hr = evaluation.hybridResult;
 
-        // Trigger Step-Up OTP if trust score dropped below role threshold into OTP tier (41–60)
+        // Trigger Step-Up OTP if trust score dropped below role threshold into OTP tier (51–60)
         const roleThreshold = getRoleOtpThreshold(session.role);
-        if (session.currentTrustScore <= roleThreshold && session.currentTrustScore >= 41 && !session.otpVerified) {
+        if (session.currentTrustScore <= roleThreshold && session.currentTrustScore > 50 && !session.otpVerified) {
           const activeOtp = sessionOtpCodes.get(session.id);
           if (!activeOtp || Date.now() >= activeOtp.expiresAt) {
             void issueOtpForSession(
@@ -2937,9 +2937,9 @@ async function startServer() {
     const evaluation = await trustEngine.evaluateSessionTrust(session, evalEventDesc, user, req.path);
     const hr = evaluation.hybridResult;
 
-    // Automatically trigger Step-Up OTP if trust score dropped to or below role threshold into OTP tier (41–60)
+    // Automatically trigger Step-Up OTP if trust score dropped to or below role threshold into OTP tier (51–60)
     const roleThreshold = getRoleOtpThreshold(session.role);
-    if (session.currentTrustScore <= roleThreshold && session.currentTrustScore >= 41 && !session.otpVerified) {
+    if (session.currentTrustScore <= roleThreshold && session.currentTrustScore > 50 && !session.otpVerified) {
       const activeOtp = sessionOtpCodes.get(session.id);
       if (!activeOtp || Date.now() >= activeOtp.expiresAt) {
         void issueOtpForSession(
@@ -2949,7 +2949,7 @@ async function startServer() {
       }
     }
 
-    // 6. Sensitivity Clearance: Confidential documents require Trust Score >= 81 (Full Access tier)
+    // 6. Sensitivity Clearance: Confidential documents require Trust Score >= 80 (Full Access tier)
     if (record.documentClassification === "Confidential" && session.currentTrustScore < trustConfig.thresholds.lowRiskMin) {
       const deniedAudit: AuditLog = {
         id: `al_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
@@ -2980,14 +2980,14 @@ async function startServer() {
       });
     }
 
-    // 7. Policy Decision Checks: Blocked Session (<= 40)
-    if ((session.currentTrustScore <= trustConfig.thresholds.criticalMax || session.status === "Blocked") && !session.otpVerified) {
+    // 7. Policy Decision Checks: Blocked Session (< 40)
+    if ((session.currentTrustScore < trustConfig.thresholds.criticalMax || session.status === "Blocked") && !session.otpVerified) {
       session.status = "Blocked";
       return res.status(403).json({
         authorized: false,
         decision: "BLOCKED",
         error: "blocked",
-        message: `Access Denied: Session locked due to critical trust degradation (Trust Score ${session.currentTrustScore} <= ${trustConfig.thresholds.criticalMax}).`,
+        message: `Access Denied: Session locked due to critical trust degradation (Trust Score ${session.currentTrustScore} < ${trustConfig.thresholds.criticalMax}).`,
         trustScore: session.currentTrustScore,
         riskLevel: evaluation.riskLevel
       });
@@ -3732,7 +3732,7 @@ Document Hash        : ${hash}
 
     const prev = targetSess.currentTrustScore;
     targetSess.currentTrustScore = parseInt(overrideScore);
-    if (targetSess.currentTrustScore <= trustConfig.thresholds.criticalMax) {
+    if (targetSess.currentTrustScore < trustConfig.thresholds.criticalMax) {
       targetSess.status = "Blocked";
     } else {
       targetSess.status = "Active";
